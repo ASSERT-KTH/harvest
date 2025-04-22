@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 #
 # Analyzes paper notifications (Google Scholar, Semanticscholar, planetse) sent over email
+#
+# send notifications over email
+#
+# TODO: add support for searching in the main search engines
+# TODO: document the past matches on a web page
+# 
 # To make stats of reasons, as easy as jq .reason cache/*.json | freqlines
 # grep -l "Evaluating large language models trained on code" cache/*.json | xargs rm 
 #
@@ -27,10 +33,17 @@ import time
 import json
 import config
 import sys
+from harvest_lib import *
 
 
+# ollama pull jeffh/intfloat-multilingual-e5-large-instruct:f16
+# kate /home/martin/workspace/reviewer-recommendation-system/embed.py
 sys.path.append("/home/martin/workspace/reviewer-recommendation-system/")
 import embed as rrs
+
+sys.path.append("/home/martin/bin/")
+import sendemail
+
 
 rrs.ensure_embedding_up()
 
@@ -47,52 +60,139 @@ citing_rx = re.compile("^(.*) [-–] (new citations|nya citat|de nouvelles citat
 related_rx = re.compile("^(.*) [-–] new related research$")
 search_rx = re.compile("^(.*) [-–] (new results|nya sökresultat)$")
 
-categories = {
-    "readinglist - Program Repair":{"labelId":"","papers":[]},
-    "readinglist - Reliability":{"labelId":"","papers":[]},
-    "readinglist - Smart contracts":{"labelId":"","papers":[]},
-    "readinglist - LLM general":{"labelId":"","papers":[]},
-    "readinglist - LLM on code":{"labelId":"","papers":[]},
-    "readinglist - Chains":{"labelId":"","papers":[]},
-    "readinglist - Fake":{"labelId":"","papers":[]},
-    "readinglist - Diversity":{"labelId":"","papers":[]},
-    "readinglist - Testing":{"labelId":"","papers":[]},
-    "readinglist - WebAssembly":{"labelId":"","papers":[]},
-    "readinglist - colleagues":{"labelId":"","papers":[]},
-    "readinglist - uncategorized":{"labelId":"","papers":[]}
-    }
+def type_alert(subject):
+    subject = subject.replace('"','')
+    am = author_rx.match(subject)
+    if am:
+        return ("author_alert", am.group(1))
+    cm = citing_rx.match(subject)
+    if cm:
+        return ("citing_alert", cm.group(1))
+    rm = related_rx.match(subject)
+    if rm:
+        return ("related_alert", rm.group(1))
+    sm = search_rx.match(subject)
+    if sm:
+        return ("search_alert", sm.group(1))
+    if "Alert is inactive" in subject:
+        return ("inactive", "")
+    if "New citations to my articles" in subject:
+        return ("citing_me", "")
+    if "Recommended articles" in subject:
+        return ("scholar_recommendation", "")
+    
+CLASSIFICATION_DATA = {
+ 'uncategorized': [],
+ 'Program Repair': ['repair',
+                    'fix',
+                    'patch',
+                    'bug',
+                    'debug',
+                    'overfitting'
+                    ],
+ 'Vulnerability': [
+                    'vulnerabil' # vivi
+                    ],
+ 'Chains': [ 'supply chain',
+            'protection',
+            'integrity',
+            'guard',
+            'package',
+            'librar',
+            'dependenc',
+            'password',
+            'breaking',
+            'sbom',
+            'substitut',
+            'transparency',
+            'github action',
+            'bill',
+            'build',
+            'air-gap',
+            ' go ',
+            'golang',
+            'uncompromise',
+            'incompatib',
+            'sigstore'],
+ 'Smart contracts': ['blokchain',
+                     'smart contract',
+                     'smart-contract',
+                     'bitcoin',
+                     'ethereum',
+                     'dapp',
+                     'solidity',
+                     'evm',
+                     'empirical review of automated analysis tools',
+                     'enter the hydra',
+                     'gigahorse',
+                     'exploit generation',
+                     'flash loan',
+                     'stablecoin',
+                     'framework for smart',
+                     'nft',
+                     'audit',
+                     'fungible',
+                     'wallet',
+                     'governance',
+                     'defi',
+                     'zocrates',
+                     'solana',
+                     'attackdb',
+                     'decentralized autonomous organization'
+                     ],
+ 'LLM on code': ['incoder',
+                 'codet5',
+                 'learning performance-improving',
+                 'neural code',
+                 'model of code',
+                 'models of code',
+                 'models for code',
+                 'trained on code',
+                 'octopack',
+                 'llm',
+                 'code llama',
+                 'codellama',
+                 'code-llama',
+                 'models of source code',
+                 'neural',
+                 'learning',
+                 'AI code',
+                 'fine-tun',
+                 'python-state-changes',
+                 'transformer',
+                 'translation'],
+ 'Code analysis': [ 'spoon',
+                    'dataset',
+                    'differencing'],
+ 'Testing': ['test', 'metamorphic','oracle'],
+ # 'Diversity': [],
+ 'Fake': ['fake', 'decoy', 'honeypot'],
+ 'LLM general': ['language model', 
+                 'pre-training', 
+                 'toolformer',
+                 'jigsaw',
+                 'langchain',
+                 'talm'],
+ 'Reliability': ['fault','robustness', 'multi-variant', 'divers', 'chaos', 'n-version', 'antifrag', 'heal','observability']}
+
+
+categories = {}
+for i,j in CLASSIFICATION_DATA.items():
+    categories["readinglist - "+i] = {"labelId":"","papers":[]}
 
 class Paper:
     def __init__(self, url, desc):
         self.url = url
         self.reader_url = ""
         self.desc = desc
-        self.author = set()
-        self.citing = set()
-        self.related = set()
-        self.search = set()
-        self.reason = "noreason"
+        self.reason = []
         self.abstract = None
+        self.note = None
 
     def note_subject(self, subject):
-        subject = subject.replace('"','')
-        self.reason = subject
-        am = author_rx.match(subject)
-        if am:
-            self.author.add(am.group(1))
-            return
-        cm = citing_rx.match(subject)
-        if cm:
-            self.citing.add(cm.group(1))
-            return
-        rm = related_rx.match(subject)
-        if rm:
-            self.related.add(rm.group(1))
-            return
-        sm = search_rx.match(subject)
-        if sm:
-            self.search.add(sm.group(1))
-            return
+        type_a = type_alert(subject)
+        if type_a:
+            self.reason.append(type_a[0]+":"+type_a[1])
 
     def dump(self):
         print(str(self))
@@ -100,17 +200,7 @@ class Paper:
     def print_reason(self):
         return ", ".join(self.array_reason())
     def array_reason(self):
-        result=[]
-        if len(self.author) != 0:
-            result+= ["author: " + x for x in self.author]
-        if len(self.citing) != 0:
-            result+= ["citing: " + x for x in self.citing]
-        if len(self.related) != 0:
-            result+= ["related: " + x for x in self.related]
-        if len(self.search) != 0:
-            result+= ["search: " + x for x in self.search]
-        if len(result)==0: result.append(self.reason)
-        return result
+        return self.reason
     
     def __str__2(self):
         r=""
@@ -178,7 +268,7 @@ def extract_my_articles(data_txt):
             #print(url, title)
             paper = Paper(scholar_url, title)
             paper.subject = "to my articles"
-            paper.citing.add(i.xpath('../following-sibling::table')[0].xpath(".//span/text()")[0])
+            paper.reason.append("citing: "+i.xpath('../following-sibling::table')[0].xpath(".//span/text()")[0])
             papers[scholar_url] = paper
     return papers
     
@@ -212,10 +302,6 @@ class ScholarScraper():
         n=0
         for paper in new_papers.values():
             n+=self.save_paper(paper)
-        # mark the message as read
-        self.service.users().messages().modify(userId='me', id=message['id'], body={'removeLabelIds': ['UNREAD']}).execute()
-        #if n>0: raise Exception()
-
         self.papers.update(new_papers)
 
     def dump(self):
@@ -273,19 +359,35 @@ class ScholarScraper():
         #print(unknown_reasons)
         print()
 
-def path_on_disk_internal(papertitle):
-    """ returns the local file name corresponding to a paper """
+def DEPRECATED_path_on_disk_internal_v1(papertitle, prefix):
+    assert prefix.endswith("/")
+    """ DEPRECATED SEE V2 """
     # remove trailing space and trailing dots from paper.desc
-    papertitle = papertitle.strip().rstrip(".").replace("  "," ")
-    return "/home/martin/workspace/scholar-harvest/cache/"+hashlib.sha256(papertitle.encode("utf-8")).hexdigest()+".json"
+    papertitle = papertitle.strip().rstrip(".").replace("   "," ").replace("  "," ")
+    return prefix+hashlib.sha256(papertitle.encode("utf-8")).hexdigest()+".json"
 def path_on_disk(paper):
     return path_on_disk_internal(paper.desc)
+def path_on_disk_internal(papertitle, prefix = "/home/martin/workspace/scholar-harvest/cache/harvest/"):
+    return path_on_disk_internal_v2(papertitle, prefix)
+
+def already_seen_url(url, prefix):
+    """
+    example: urlseen, thepath = already_seen_url("https://doi.org/10.1145/3597503.3623337", "/home/martin/workspace/scholar-harvest/cache/XXXXXXX/")
+    """
+    assert prefix.endswith("/")
+    thepath = prefix+hashlib.sha256(url.encode("utf-8")).hexdigest()+".json"
+    return os.path.exists(thepath), thepath
+READING_NOTES=open("/home/martin/workspace/related-work-github/ASSERT-KTH-related-work/allall.md").read().lower()
 def already_seen(paper):
     fname= path_on_disk(paper)
+    if paper.desc.lower() in READING_NOTES: return True
     return os.path.exists(fname)
+
 def record_paper_as_seen(paper, **kwargs):
+    """
+        we've already seen this paper, we create a file on disk accordingly
+    """
     fname= path_on_disk(paper)
-    # with open(fname,"w") as f: f.write(paper.desc) # we stop the naive version
     with open(fname,"w") as f: 
         data = paper.as_dict()
         data.update(kwargs)
@@ -495,17 +597,128 @@ def create_harvest_email_paper(paper, service, **kwargs):
     paper.tldr = paper_data["tldr"]
     paper.authors = paper_data["authors"]
     paper.abstract = paper_data["abstract"]
-    
-    
+    paper.note = paper_data["note"]
+        
     paper.origin = origin
     
     category = compute_category(paper)
     paper.category = category 
 
     paper.detection_date = detection_date.isoformat()
-    
-    save_paper_and_notify_email(paper, service)
+
+    # if high reputation only   
+    if is_high_reputation(paper.url):
+        notify_email(paper, service)
+    else: 
+        print("no reputation for "+paper.url)   
+
+    record_paper_as_seen(paper)
+
     return True
+
+def is_high_reputation(url):
+    """
+    check if the paper is from a high reputation source, before sending a notification
+    discards MDPI for example
+    """
+    if "doi.org" in url: return True
+    if "arxiv.org" in url: return True
+    if "semanticscholar.org" in url: return True
+    if "dblp.org" in url: return True
+    if "computer.org" in url: return True
+    if "ieeexplore.ieee.org" in url: return True
+    if "dl.acm.org" in url: return True
+    if "link.springer.com" in url: return True
+    if "onlinelibrary.wiley.com" in url: return True
+    if "sciencedirect.com" in url: return True
+    if "linkinghub.elsevier.com" in url: return True
+    if "diva-portal.org" in url: return True
+    return False
+
+def get_doi_target(doi):
+    # https://doi.org/api/handles/10.1145/3597503.3623337
+    url = f"https://doi.org/api/handles/{doi}"
+    data = requests.get(url).json()
+    for i in data["values"]:
+        if i["type"] == "URL":
+            return i["data"]["value"]
+    raise Exception("doi not found")
+
+def collect_paper_data_from_doi(doi):
+    return collect_paper_data_from_url(get_doi_target(url))
+
+def collect_paper_data_from_url_with_cache(url):
+    urlseen, thepath = already_seen_url(url,"/home/martin/workspace/scholar-harvest/cache/collect_paper_data_from_url_with_cache/")
+    if urlseen:
+        with open(thepath, "r") as f:
+            data = json.load(f)
+            if "url" in data:
+                return data
+    data = collect_paper_data_from_url(url)
+    with open(thepath, "w") as f:
+        f.write(json.dumps(data))
+    return data
+
+def info_from_crossref(doi):
+
+    """
+    Transform CROSSREF JSON data to the specified FORMAT structure.
+    
+    Args:
+        crossref_data (dict): The CROSSREF JSON data
+    
+    Returns:
+        dict: The transformed data in the FORMAT structure
+    """
+
+    crossref_data = requests.get(f"https://api.crossref.org/works/{doi}").json()
+    message = crossref_data.get("message", {})
+    
+    # Extract basic information
+    title = message.get("title", [""])[0] if message.get("title") else ""
+    doi = message.get("DOI", "")
+    url = f"https://doi.org/{doi}" if doi else ""
+    
+    # Extract authors
+    authors = []
+    for author in message.get("author", []):
+        given = author.get("given", "")
+        family = author.get("family", "")
+        full_name = f"{given} {family}".strip()
+        if full_name:
+            authors.append(full_name)
+    
+    # Extract venue information
+    venue_title = ""
+    if message.get("container-title"):
+        venue_title = message.get("container-title", [""])[0]
+    elif message.get("event", {}).get("name"):
+        venue_title = message.get("event", {}).get("name", "")
+    
+    # Create a note with publication date and publisher information
+    published_date = ""
+    if message.get("published"):
+        date_parts = message.get("published", {}).get("date-parts", [[]])[0]
+        if date_parts:
+            published_date = "-".join(str(part) for part in date_parts)
+    
+    publisher = message.get("publisher", "")
+    note = f"Published: {published_date}, Publisher: {publisher}" if published_date or publisher else ""
+    
+    # Create the formatted output
+    formatted_output = {
+        "url": url,
+        "title": title,
+        "semanticscholarid": "",  # Not available in CROSSREF data
+        "abstract": "",  # Not available in CROSSREF data
+        "tldr": "",  # Not available in CROSSREF data
+        "authors": authors,
+        "venue_title": venue_title,
+        "doi": doi,
+        "note": note
+    }
+    
+    return formatted_output
 
 def collect_paper_data_from_url(url):
     """
@@ -525,6 +738,11 @@ def collect_paper_data_from_url(url):
     doi=None
     abstract = None
     title = None
+    note = None
+    if "/doi.org/" in url:
+        doi = url.replace("https://doi.org/","").replace("http://doi.org/","")
+        return collect_paper_data_from_doi(doi)
+        
     if "arxiv.org" in url:    
         ## https://www.monperrus.net/martin/arxiv-json.py?id=2304.12015
         semanticscholarid="url:"+url.replace("/html/","/pdf/")
@@ -547,29 +765,37 @@ def collect_paper_data_from_url(url):
         dblp_metadata = requests.get(dblp_url).json()
         venue_title = dblp_metadata["venue_title"]
         authors = ", ".join(dblp_metadata["author"])
-        print("TODO implement DOI and chain for DBLP")
+        # DOI Chain from dblp
+        if "ee" in dblp_metatata:
+            return collect_paper_data_from_doi(dblp_metadata["ee"])
+        # if "doi.org" in dblp_metadata["ee"]:
+        #     url = get_doi_target(dblp_metadata["ee"])
+        # print("TODO implement DOI and chain for DBLP")
     if "dl.acm.org" in url:
         components = [x for x in url.split("/") if len(x)>0]
         doi = components[-2]+"/"+components[-1]
+        return info_from_crossref(doi)
         # no api for acm
         # see https://stackoverflow.com/questions/33380715/acm-digital-library-access-with-r-no-api-so-how-possible
         # alternative 1: go through crossref
         # alternative 2: there is the bibtex export which actually returns json
-        r = requests.post('https://dl.acm.org/action/exportCiteProcCitation', data={
+        req = requests.post('https://dl.acm.org/action/exportCiteProcCitation', data={
             'dois': doi,
             'format': 'bibTex',
             'targetFile': 'custom-bibtex',
-        }).json()
-        if "container-title" in r["items"][0][doi]:
-            venue_title = r["items"][0][doi]["container-title"]
-        elif "container-title-short" in r["items"][0][doi]:
-            venue_title = r["items"][0][doi]["container-title-short"]
-        else:
-            print("TODO dl.acm.org"+str(r["items"][0][doi].keys()))
-        title = r["items"][0][doi]["title"]
-        try:
-            authors = ", ".join([x["given"]+" "+x["family"] for x in r["items"][0][doi]["author"]])
-        except: pass
+        })
+        if '<!DOCTYPE html>' not in req.text:
+            r = req.json()
+            if "container-title" in r["items"][0][doi]:
+                venue_title = r["items"][0][doi]["container-title"]
+            elif "container-title-short" in r["items"][0][doi]:
+                venue_title = r["items"][0][doi]["container-title-short"]
+            else:
+                print("TODO dl.acm.org"+str(r["items"][0][doi].keys()))
+            title = r["items"][0][doi]["title"]
+            try:
+                authors = ", ".join([x["given"]+" "+x["family"] for x in r["items"][0][doi]["author"]])
+            except: pass
         # print("acm.org TODO implement call to https://dl.acm.org/action/exportCiteProcCitation")
     if "link.springer.com" in url:
         # example url-analysis.py http://link.springer.com/10.1007/s11219-025-09709-4
@@ -621,11 +847,12 @@ def collect_paper_data_from_url(url):
             pii = match.group(1)
             api_url = 'https://api.elsevier.com/content/article/pii/'+ pii + "?httpAccept=application/json"
             elsevier_data = requests.get(api_url, headers = {"x-els-apikey":config.sciencedirect_key}).json()
-            venue_title = elsevier_data["full-text-retrieval-response"]["coredata"]["prism:publicationName"]
-            doi = elsevier_data["full-text-retrieval-response"]["coredata"]["prism:doi"]
-            title = elsevier_data["full-text-retrieval-response"]["coredata"]["dc:title"]
-            abstract = elsevier_data["full-text-retrieval-response"]["coredata"]["dc:description"]
-            url = url.replace('?dgcid=rss_sd_all','')
+            if "full-text-retrieval-response" in elsevier_data:
+                venue_title = elsevier_data["full-text-retrieval-response"]["coredata"]["prism:publicationName"]
+                doi = elsevier_data["full-text-retrieval-response"]["coredata"]["prism:doi"]
+                title = elsevier_data["full-text-retrieval-response"]["coredata"]["dc:title"]
+                abstract = elsevier_data["full-text-retrieval-response"]["coredata"]["dc:description"]
+                url = url.replace('?dgcid=rss_sd_all','')
             # print(elsevier_data)
             # note the abstract is not available in the free version of the API
             # author = " and ".join([x["$"] for x in elsevier_data["full-text-retrieval-response"]["coredata"]["dc:creator"]])
@@ -641,14 +868,17 @@ def collect_paper_data_from_url(url):
         # we can also get tldr for ieee papers
         ieeeid = [x for x in url.split("/") if len(x)>0][-1]
         # curl "https://ieeexploreapi.ieee.org/api/v1/search/articles?apiKey=XXXXXX&article_number=10833642"
-        ieeedata = requests.get("https://ieeexploreapi.ieee.org/api/v1/search/articles?article_number="+ieeeid+"&apiKey="+config.ieeexplore_key).json()
-        if "error" not in ieeedata and "articles" in ieeedata and "doi" in ieeedata["articles"][0]:
-            doi = ieeedata["articles"][0]["doi"]
-            venue_title = ieeedata["articles"][0]["publication_title"]
-            abstract = ieeedata["articles"][0]["abstract"]
-            # semanticscholarid="doi:"+doi
-        else: print("no data in ieee "+json.dumps(ieeedata, indent=2))
-        
+        resp = requests.get("https://ieeexploreapi.ieee.org/api/v1/search/articles?article_number="+ieeeid+"&apiKey="+config.ieeexplore_key)
+        if resp.status_code != 418: # i'm a teapot, WTF?
+            ieeedata = resp.json()
+            if "error" not in ieeedata and "articles" in ieeedata:
+                if "doi" in ieeedata["articles"][0]:
+                    doi = ieeedata["articles"][0]["doi"]
+                venue_title = ieeedata["articles"][0]["publication_title"]
+                abstract = ieeedata["articles"][0]["abstract"]
+                # semanticscholarid="doi:"+doi
+            else: print("no data in ieee "+json.dumps(ieeedata, indent=2))
+            
         
     # ok we can ask semanticscholarid for tldr
     if semanticscholarid!="" and ( \
@@ -657,7 +887,7 @@ def collect_paper_data_from_url(url):
         if semanticscholarid == "" and doi:
             semanticscholarid="doi:"+doi
         #print(semanticscholarid)
-        semanticscholar = requests.get("https://api.semanticscholar.org/graph/v1/paper/"+semanticscholarid+"?fields=title,tldr,authors", headers = {"x-api-key": config.semanticscholar_key}).json()
+        semanticscholar = requests.get("https://api.semanticscholar.org/graph/v1/paper/"+semanticscholarid+"?fields=title,tldr,authors,embedding,embedding.specter_v2", headers = {"x-api-key": config.semanticscholar_key}).json()
         #print(semanticscholar)
         if semanticscholar!=None and "paperId" in semanticscholar:
             # replacing "url:https://arxiv.org/pdf/2409.18317" by real paper if for the reader URL below
@@ -666,6 +896,14 @@ def collect_paper_data_from_url(url):
             tldr=semanticscholar["tldr"]["text"]+"\n\n"
         if semanticscholar!=None and "authors" in semanticscholar:           
             authors = ", ".join([x["name"] for x in semanticscholar["authors"]])
+            
+        if semanticscholar!=None and "embedding" in semanticscholar:           
+            note = "related:\n- "+"\n- ".join(rrs.search_in_pinecone_semanticscholar(title, semanticscholar["embedding"]["vector"], 5))
+        #             # test of closest papers
+        # closest = rrs.search_in_pinecone_str(paper.desc)
+        # if len(closest) > 0:
+        #     email += "\n\nclosest papers:\n"+rrs.search_in_pinecone_str(paper.desc)
+
         # if "url:" not in semanticscholarid and "doi:" not in semanticscholarid :
             # we like the semanticscholar reader
             # paper.reader_url = "https://www.semanticscholar.org/reader/"+semanticscholarid
@@ -688,14 +926,20 @@ def collect_paper_data_from_url(url):
         "tldr": tldr,
         "authors": authors,
         "venue_title" : venue_title,
-        "doi" : doi
+        "doi" : doi,
+        "note" : note
     }
 
-def save_paper_and_notify_email(paper, service):
+def notify_email(paper, service):
     # create an email body with the paper
     encoded_title = "=?utf-8?B?" + base64.b64encode(paper.desc.encode("utf-8")).decode("ascii") + "?="
-    email = "From: <harvest@monperrus.net>\nTo: <martin.monperrus@gmail.com>\nSubject: "+encoded_title+"\n\n" + str(paper)
+    
+    # must end with \n\n
+    header = "From: <harvest@monperrus.net>\nTo: <martin.monperrus@gmail.com>\nSubject: "+encoded_title+"\n\n"
 
+    # body, see     def __str__(self):        r+=self.desc+"\n"        r+=self.url+"\n"
+    email = str(paper)
+    
     if paper.venue_title and paper.venue_title != "":
         email += ""+paper.venue_title+"\n"
     
@@ -714,212 +958,86 @@ def save_paper_and_notify_email(paper, service):
     email += "\n\ncategory: "+paper.category
     email += "\nreason: "+paper.print_reason()+"\n"
     
-    if paper.origin != "":
+    if paper.origin and paper.origin != "":
         email += "origin: "+paper.origin+"\n"
         
-    # test of closest papers
-    email += "\n\nclosest papers:\n"+rrs.search_in_pinecone_str(paper.desc)
+    if paper.note and paper.note != "":
+        email += paper.note+"\n"
 
     # create a new email
     # Label_4447645605958895953 is label for harvest.py
     recorded = service.users().messages().insert(userId='me', body={
         'raw': 
-            base64.urlsafe_b64encode(email.encode("utf-8")).decode("utf-8"), "labelIds":['UNREAD', "Label_4447645605958895953", categories["readinglist - "+paper.category]["labelId"]]}).execute()
+            base64.urlsafe_b64encode((header + email).encode("utf-8")).decode("utf-8"), "labelIds":['UNREAD', "Label_4447645605958895953", categories["readinglist - "+paper.category]["labelId"]]}).execute()
     recorded = service.users().messages().get(userId='me', id=recorded["id"], format='metadata', metadataHeaders=['Message-Id']).execute()
     rfc822msgid = recorded["payload"]["headers"][0]['value']
     
     # test of sending emails, it works
-    # if "webassembly" in paper.desc.lower():
+    # if "webassembly" in paper.desc.lower(): # old sending emails vie gmail
     #     # send email to some collaborators
     #     res = service.users().messages().send(userId='me', body={
-    #         'raw': base64.urlsafe_b64encode(email.replace('<martin.monperrus@gmail.com>','<monperrus@kth.se>,<xppcoder@gmail.com>,<benoit.baudry@umontreal.ca>').encode("utf-8")).decode("utf-8")
+    #         'raw': base64.urlsafe_b64encode((header + email).replace('<martin.monperrus@gmail.com>','<monperrus@kth.se>,<xppcoder@gmail.com>,<benoit.baudry@umontreal.ca>').encode("utf-8")).decode("utf-8")
     #         }).execute()
-    
+    if paper.category.lower() == "LLM on code".lower():
+        # send the email
+        args = sendemail.EmailArgs()
+        args.sender_email = "harvest@monperrus.net"
+        args.sender_password = sendemail.login_keyring.get_password('login2', args.sender_email)
+        args.receiver_email = ""
+        # comma separated list, ** BCC ** 
+        args.bcc = "markus.borg@codescene.com"
+        args.subject = encoded_title
+        # args.message = invitation.serialize() # ics version
+        # print(dir(invitation))
+        args.message = email
+        # args.smtp_server = server # should be default
+        # arg.to = ""  
+        args.list = "harvest - "+paper.category
+        sendemail.send_email(args)
+        
     # print(res)
 
     #print("unique_id", unique_id)
-    print("saving", paper.desc, paper.category)
-    record_paper_as_seen(paper, unique_id = rfc822msgid)
+    print("emailed", paper.desc, paper.category)
 
 def get_labelId(category):
     if category=="planetse": return "Label_816000980291680327"
     return categories["readinglist - "+category]["labelId"]
 
-def classify(reason_txt):
-    return classify_internal(reason_txt)[1]
+# def classify(reason_txt):
+#     return classify_internal(reason_txt)[1]
+
+def compute_category(paper, title = False):
+    """
+      classify the paper
+      categorize from field reason (eg citing), then from title, according to function classify_internal
+    """
+
+    reason_txt = paper.print_reason()
+    if title: reason_txt = paper.desc.lower()
+    
+    pattern, classification = classify_internal(reason_txt)
+    increment_integer_in_file(pattern)
+    
+    if classification != "uncategorized": return classification
+
+    # last chance with the title
+    if not title: return compute_category(paper, title = True)
+
+    # this is never executed because after the compute_category(paper, title = True) before
+    #if reason_txt.startswith("author:"): return "colleagues"
+
+    return "uncategorized"
 
 def classify_internal(reason_txt):
     reason_txt = reason_txt.lower()
-    
-    DATA = {
- 'Program Repair': ['repair',
-                    'fix',
-                    'patch',
-                    'bug',
-                    'debug',
-                    'sequencer',
-                    'overfitting',
-                    'vulnerability' # vivi
-                    ],
-'Chains': [ 'supply chain',
-            'protection',
-            'integrity',
-            'package',
-            'librar',
-            'dependenc',
-            'password',
-            'breaking',
-            'sbom',
-            'github action',
-            'bill',
-            'build',
-            ' go ',
-            'golang',
-            'uncompromise',
-            'incompatib'],
- 'Smart contracts': ['blokchain',
-                     'smart contract',
-                     'bitcoin',
-                     'ethereum',
-                     'dapp',
-                     'solidity',
-                     'evm',
-                     'empirical review of automated analysis tools',
-                     'enter the hydra',
-                     'gigahorse',
-                     'exploit generation',
-                     'flash loan',
-                     'stablecoin',
-                     'framework for smart',
-                     'nft',
-                     'fungible',
-                     'wallet','governance','decentralized autonomous organization'],
- 'LLM on code': ['incoder',
-                 'codet5',
-                 'learning performance-improving',
-                 'neural code',
-                 'model of code',
-                 'trained on code',
-                 'models of code',
-                 'models for code',
-                 'octopack',
-                 'llm',
-                 'code llama',
-                 'codellama',
-                 'code-llama',
-                 'models of source code',
-                 'neural',
-                 'unsupervised translation of programming languages'],
- 'Testing': ['test', 'metamorphic','oracle'],
- # 'Diversity': [],
- 'Fake': ['fake', 'decoy', 'honeypot'],
- 'LLM general': ['toolformer',
-                 'jigsaw',
-                 'langchain',
-                 'talm'],
- 'Reliability': ['divers', 'chaos', 'n-version', 'antifrag', 'heal'],
- 'WebAssembly': ['webassembly', 'wasm']}
- 
-    for THEME,j in DATA.items():
+     
+    for THEME,j in CLASSIFICATION_DATA.items():
       for pattern in j:
-        if pattern in reason_txt: 
+        if pattern.lower() in reason_txt.lower(): 
             return pattern,THEME
     
     
-    #if     'repair' in reason_txt \
-        #or 'bug' in reason_txt \
-        #or 'patch' in reason_txt\
-        #or 'sequencer' in reason_txt\
-        #or 'overfitting' in reason_txt\
-        #or 'debug' in reason_txt\
-            #:
-        #return "Program Repair"
-    
-    
-    
-    #if     'bitcoin' in reason_txt \
-        #or 'ethereum' in reason_txt\
-        #or 'smart contract' in reason_txt \
-        #or 'empirical review of automated analysis tools' in reason_txt \
-        #or 'evm' in reason_txt \
-        #or 'enter the hydra' in reason_txt \
-        #or 'gigahorse' in reason_txt \
-        #or "dynamic exploit generation" in reason_txt\
-        #or 'flash loan' in reason_txt\
-        #or "stablecoin" in reason_txt \
-        #or 'dapp' in reason_txt\
-        #or 'solidity' in reason_txt\
-        #or 'framework for smart' in reason_txt\
-        #or 'nft' in reason_txt\
-        #or 'fungible' in reason_txt\
-        #or 'wallet' in reason_txt\
-    #:
-        #return "Smart contracts"
-    
-    #if     'incoder' in reason_txt \
-        #or 'codet5' in reason_txt \
-        #or "learning performance-improving" in reason_txt \
-        #or "neural code" in reason_txt \
-        #or "model of code" in reason_txt \
-        #or "trained on code" in reason_txt \
-        #or "models of code" in reason_txt \
-        #or "models for code" in reason_txt \
-        #or "octopack" in reason_txt \
-        #or "models of source code" in reason_txt \
-        #or "unsupervised translation of programming languages" in reason_txt:
-        #return "LLM on code"
-    
-    
-    #if     'toolformer' in reason_txt \
-        #or 'jigsaw' in reason_txt \
-        #or 'langchain' in reason_txt \
-        #or 'code llama' in reason_txt \
-        #or 'codellama' in reason_txt \
-        #or 'code-llama' in reason_txt \
-        #or 'talm' in reason_txt:
-        #return "LLM general"
-    
-    #if 'supply chain' in reason_txt \
-        #or 'uncompromise' in reason_txt\
-        #or 'protection' in reason_txt\
-        #or 'integrity' in reason_txt\
-        #or 'package' in reason_txt\
-        #or 'librar' in reason_txt\
-        #or 'dependenc' in reason_txt\
-        #or 'password' in reason_txt\
-        #or 'breaking' in reason_txt\
-        #or 'sbom' in reason_txt\
-        #or 'github action' in reason_txt\
-        #or 'bill' in reason_txt\
-        #or 'build' in reason_txt\
-        #or ' go ' in reason_txt\
-        #or 'golang' in reason_txt\
-        #or 'incompatib' in reason_txt\
-            #:
-        #return "Chains"
-    #if     'chaos' in reason_txt \
-        #or 'n-version' in reason_txt \
-        #or 'antifrag' in reason_txt \
-        #or 'heal' in reason_txt \
-    #:
-        #return "Reliability"
-    #if     'fake' in reason_txt \
-        #or 'decoy' in reason_txt \
-        #or 'honey' in reason_txt \
-    #:
-        #return "Fake"
-    #if 'diversi' in reason_txt \
-    #:
-        #return "Diversity"
-    #if   'test' in reason_txt \
-      #or 'metamorphic' in reason_txt \
-    #:
-        #return "Testing"
-
-    #if   'webassembly' in reason_txt \
-      #or 'wasm' in reason_txt \
-    #:
-        #return "WebAssembly"
 
     return "none", "uncategorized"
 
@@ -944,26 +1062,7 @@ def increment_integer_in_file(file_path):
     return integer
 
 
-def compute_category(paper, title = False):
-    """
-      categorize from field reason (eg citing), then from title, according to function classify_internal
-    """
 
-    reason_txt = paper.print_reason()
-    if title: reason_txt = paper.desc.lower()
-    
-    pattern, classification = classify_internal(reason_txt)
-    increment_integer_in_file(pattern)
-    
-    if classification != "uncategorized": return classification
-
-    # last chance with the title
-    if not title: return compute_category(paper, title = True)
-
-    # must be last
-    if reason_txt.startswith("author:"): return "colleagues"
-
-    return "uncategorized"
 
 
 class ScholarParser(HTMLParser):
@@ -1107,6 +1206,10 @@ def classify_scholarnotifications():
         v = payload['body']['data']
         scraper.set_subject(subj)
         scraper.feed(msg)
+        
+        # mark the message as read
+        scraper.service.users().messages().modify(userId='me', id=m['id'], body={'removeLabelIds': ['UNREAD']}).execute()
+
 
     scraper.dump_by_reason()
 
@@ -1145,7 +1248,7 @@ def classify_planetse():
         #print(msg['labelIds'])
         payload = msg['payload']
         subj = [h['value'] for h in payload['headers'] if h['name']=='Subject'][0]
-        # X-RSS-URL seems to be added by r2e, nice
+        # X-RSS-URL is added by r2e, nice
         url = [h['value'] for h in payload['headers'] if h['name']=='X-RSS-URL'][0]
         
         # avoid duplicate
@@ -1154,7 +1257,7 @@ def classify_planetse():
         
         # classification = compute_category(paper)
         pattern, classification = classify_internal(paper.desc.lower())
-        paper.reason = "title match "+pattern
+        paper.reason.append("title match "+pattern)
         if classification != "uncategorized":
             
             # in theory we can do that
@@ -1208,12 +1311,16 @@ def classify_semanticscholar():
             for i in doc.xpath(".//a[contains(@class,'paper-link')]"):
                 link = i.attrib["href"]
                 # removing ?utm_source=alert_email
-                if "?" in link: link = link.split("?")[0]
+                # if "?" in link: link = link.split("?")[0]
+                link = link.replace("utm_source=alert_email","")
+                if link.endswith("?"): link = link[:-1]
+                
                 paper = Paper(link, i.text.strip())
-                paper.reason = "semanticscholar recommendation"
+                paper.reason.append("semanticscholar recommendation")
                 if create_harvest_email_paper(paper, service, origin="semanticscholar", detection_date=msg_date):
                     #print("semanticscholar:", i.text)
                     pass
+        # we put it in the trash
         service.users().messages().trash(userId='me', id=m['id']).execute()
 
 
