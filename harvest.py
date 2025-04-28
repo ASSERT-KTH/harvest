@@ -87,10 +87,12 @@ CLASSIFICATION_DATA = {
                     'fix',
                     'patch',
                     'bug',
-                    'debug',
+                    'debug', # already in "bug" but that's clear
                     'overfitting'
                     ],
  'Vulnerability': [
+                    ' go ',
+                    'golang',
                     'vulnerabil' # vivi
                     ],
  'Chains': [ 'supply chain',
@@ -100,31 +102,32 @@ CLASSIFICATION_DATA = {
             'package',
             'librar',
             'dependenc',
-            'password',
-            'breaking',
+            'break',
             'sbom',
-            'substitut',
-            'transparency',
-            'github action',
             'bill',
+            'substitut',
+            'transparency', # transparency log, binary transparency
+            ' ci ',
+            'ci/cd',
+            'continuous integration',
+            'continuous deployment',
+            'workflow',
+            'pipeline',
+            'github action',
             'build',
             'air-gap',
-            ' go ',
-            'golang',
-            'uncompromise',
-            'incompatib',
+            'compromise',
+            'compatib',
             'sigstore'],
- 'Smart contracts': ['blokchain',
+ 'Smart contracts': ['blockchain',
+                     'transaction',
                      'smart contract',
                      'smart-contract',
                      'bitcoin',
                      'ethereum',
-                     'dapp',
                      'solidity',
                      'evm',
-                     'empirical review of automated analysis tools',
-                     'enter the hydra',
-                     'gigahorse',
+                     'dapp',
                      'exploit generation',
                      'flash loan',
                      'stablecoin',
@@ -136,44 +139,59 @@ CLASSIFICATION_DATA = {
                      'governance',
                      'defi',
                      'zocrates',
+                     'zk',
+                     'zero-knowledge',
                      'solana',
                      'attackdb',
                      'decentralized autonomous organization'
+                     'empirical review of automated analysis tools',
+                     'enter the hydra',
+                     'gigahorse',
                      ],
- 'LLM on code': ['incoder',
+ 'LLM on code': [
+                 'llm',
+                 'neural',
+                 'predict',
+                 'learn',
+                 'generative',
+                 'transformer',
+                 'prompt',
+                 'representation',
+                 'fine-tun',
+                 'summar',
+                 'incoder',
                  'codet5',
+                 'code llama',
+                 'codellama',
+                 'code-llama',
+                 'octopack',
                  'learning performance-improving',
                  'neural code',
                  'model of code',
                  'models of code',
                  'models for code',
                  'trained on code',
-                 'octopack',
-                 'llm',
-                 'code llama',
-                 'codellama',
-                 'code-llama',
-                 'models of source code',
-                 'neural',
-                 'learning',
                  'AI code',
-                 'fine-tun',
-                 'python-state-changes',
-                 'transformer',
+                 'models of source code',
+                 'python-state-changes', # dataset
                  'translation'],
  'Code analysis': [ 'spoon',
                     'dataset',
-                    'differencing'],
- 'Testing': ['test', 'metamorphic','oracle'],
- # 'Diversity': [],
- 'Fake': ['fake', 'decoy', 'honeypot'],
+                    'benchmark',
+                    'merge',
+                    'differencing', 'compil', 'analysis', 'fuzz', 'transform'],
+ 'Testing': ['test', 'oracle', 'metamorphic', 'mutant'],
  'LLM general': ['language model', 
                  'pre-training', 
                  'toolformer',
                  'jigsaw',
                  'langchain',
                  'talm'],
- 'Reliability': ['fault','robustness', 'multi-variant', 'divers', 'chaos', 'n-version', 'antifrag', 'heal','observability']}
+ 'Reliability': ['fault','robustness', 'multi-variant', 'divers', 'chaos', 'n-version', 'antifrag', 'heal','observability'], 
+ 'Fake': ['fake', 'decoy', 'honeypot'],
+ 'Curiosity': ['password'],
+ 'WebAssemble': ['webassembly','wasm'],
+}
 
 
 categories = {}
@@ -181,10 +199,10 @@ for i,j in CLASSIFICATION_DATA.items():
     categories["readinglist - "+i] = {"labelId":"","papers":[]}
 
 class Paper:
-    def __init__(self, url, desc):
+    def __init__(self, url, title):
         self.url = url
         self.reader_url = ""
-        self.desc = desc
+        self.desc = title
         self.reason = []
         self.abstract = None
         self.note = None
@@ -310,33 +328,8 @@ class ScholarScraper():
             paper.dump()
 
     def save_paper(self, paper):
-        
-        #if already_seen(paper): return 1
-
-        # no need now that we have already_seen
-        #query = 'from:(harvest@monperrus.net) subject:"'+paper.desc+'"'
-        #maxRes = 10000
-        #response = self.service.users().messages().list(userId='me', q=query, maxResults=maxRes).execute()
-        #if response["resultSizeEstimate"]>0: return 0
-
-        # this should work
-        create_harvest_email_paper(paper, self.service, origin="scholar",detection_date=self.msg_date)
-        
-        #category = compute_category(paper)
-        
-        #if category != "uncategorized":
-            #print(paper.desc+" "+str(response["resultSizeEstimate"])+" -> "+category)
-        
-        ## create an email with the paper
-        #encoded_title = "=?utf-8?B?" + base64.b64encode(paper.desc.encode("utf-8")).decode("ascii") + "?="
-        #email = "From: <harvest@monperrus.net>\nTo: <martin.monperrus@gmail.com>\nSubject: "+encoded_title+"\n\n" + str(paper)
-        ## encode email to base64
-        #email = base64.urlsafe_b64encode(email.encode("utf-8")).decode("utf-8")
-        ## create a new email
-        ## Label_4447645605958895953 is label for harvest.py
-        #self.service.users().messages().insert(userId='me', body={
-            #'raw': 
-                #email, "labelIds":['UNREAD', "Label_4447645605958895953", categories["readinglist - "+category]["labelId"]]}).execute()
+                # this should work
+        create_harvest_email_paper(paper, self.service, origin="scholar",detection_date=self.msg_date)        
         return 1
     
     def dump_by_reason(self):
@@ -581,6 +574,11 @@ def get_cdsl_doi(csdlid):
 
 
 def create_harvest_email_paper(paper, service, **kwargs):
+    assert paper.url.startswith("http")
+    if not is_high_reputation(paper.url):
+        print("no reputation for "+paper.url)
+        return False
+
     origin = ""
     if "origin" in kwargs: origin = kwargs["origin"]
     detection_date = "unknown_detection_date"
@@ -601,12 +599,12 @@ def create_harvest_email_paper(paper, service, **kwargs):
         
     paper.origin = origin
     
-    category = compute_category(paper)
+    category = compute_category_keywords(paper)
     paper.category = category 
 
     paper.detection_date = detection_date.isoformat()
 
-    # if high reputation only   
+    # notify if high reputation only   
     if is_high_reputation(paper.url):
         notify_email(paper, service)
     else: 
@@ -619,8 +617,9 @@ def create_harvest_email_paper(paper, service, **kwargs):
 def is_high_reputation(url):
     """
     check if the paper is from a high reputation source, before sending a notification
-    discards MDPI for example
+    discards mdpi, researchgate.net
     """
+    if "nature.com" in url: return True
     if "doi.org" in url: return True
     if "arxiv.org" in url: return True
     if "semanticscholar.org" in url: return True
@@ -633,6 +632,7 @@ def is_high_reputation(url):
     if "sciencedirect.com" in url: return True
     if "linkinghub.elsevier.com" in url: return True
     if "diva-portal.org" in url: return True
+    if "hal.science" in url: return True
     return False
 
 def get_doi_target(doi):
@@ -950,7 +950,7 @@ def notify_email(paper, service):
         email += "\nabstract: "+paper.abstract+"\n"
 
     if paper.authors != "":
-        email += "\nauthors:"+paper.authors+"\n"
+        email += "\nauthors:"+str(paper.authors)+"\n"
 
     if paper.reader_url and paper.reader_url != "":
         email += paper.reader_url+"\n"
@@ -1007,25 +1007,23 @@ def get_labelId(category):
 # def classify(reason_txt):
 #     return classify_internal(reason_txt)[1]
 
-def compute_category(paper, title = False):
+def compute_category_keywords(paper):
     """
-      classify the paper
-      categorize from field reason (eg citing), then from title, according to function classify_internal
+      classify the paper based on keywords
+      categorize according to function classify_internal
     """
 
+    title = paper.desc.lower()
     reason_txt = paper.print_reason()
-    if title: reason_txt = paper.desc.lower()
-    
-    pattern, classification = classify_internal(reason_txt)
-    increment_integer_in_file(pattern)
-    
-    if classification != "uncategorized": return classification
 
-    # last chance with the title
-    if not title: return compute_category(paper, title = True)
+    pattern1, classification1 = classify_internal(title)    
+    increment_integer_in_file(pattern1)
 
-    # this is never executed because after the compute_category(paper, title = True) before
-    #if reason_txt.startswith("author:"): return "colleagues"
+    if classification1 != "uncategorized": return classification1
+
+    pattern2, classification2 = classify_internal(reason_txt)
+    
+    if classification2 != "uncategorized": return classification2
 
     return "uncategorized"
 
@@ -1043,6 +1041,7 @@ def classify_internal(reason_txt):
 
 
 def increment_integer_in_file(file_path):
+    file_path = file_path.replace("/","-")
     file_path = "./cache/increment_integer_in_file/"+file_path
     try:
         # Read the integer from the file
@@ -1255,7 +1254,6 @@ def classify_planetse():
         paper = Paper(url, subj)
         #if already_seen(paper): continue
         
-        # classification = compute_category(paper)
         pattern, classification = classify_internal(paper.desc.lower())
         paper.reason.append("title match "+pattern)
         if classification != "uncategorized":
