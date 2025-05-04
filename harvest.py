@@ -766,6 +766,7 @@ def collect_paper_data_from_url(url):
     if "semanticscholar.org" in url:
         semanticscholarid=url.split("/")[-1]
     if "dblp.org" in url:
+        # example https://www.monperrus.net/martin/dblp-json.py?id=conf/icst/AlshammariAHB24
         components = [x for x in url.split("/") if len(x)>0]
         dblp_id = "/".join(components[-3:])
         # added Jan 2025
@@ -826,7 +827,6 @@ def collect_paper_data_from_url(url):
         # print(springer_data)
         
     if "computer.org" in url:
-        # we can also get tldr for ieee papers
         csdlid = [x for x in url.split("/") if len(x)>0][-1]
         cdsl_data = get_cdsl_data(csdlid)
         doi = cdsl_data["doi"]
@@ -874,6 +874,10 @@ def collect_paper_data_from_url(url):
         pass
 
     if "ieeexplore.ieee.org" in url:
+        # rate limit see https://developer.ieee.org/API_Terms_of_Use2
+        # not documented in response headers
+        # rate limit on https://developer.ieee.org/apps/myapis
+        #  10 Calls per second / 200 Calls per day
         # we can also get tldr for ieee papers
         if "abs_all.jsp" in url:
             # parse url
@@ -890,7 +894,7 @@ def collect_paper_data_from_url(url):
             try:
                 ieeedata = resp.json()
             except Exception as e:
-                raise Exception("ieee error",resp.status_code,resp.text)
+                raise Exception("ieee error",resp.status_code,resp.text, resp.headers)
                 
             if "error" not in ieeedata and "articles" in ieeedata:
                 if "doi" in ieeedata["articles"][0]:
