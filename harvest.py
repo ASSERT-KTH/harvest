@@ -33,6 +33,7 @@ import time
 import json
 import config
 import sys
+from urllib.parse import urlparse
 from harvest_lib import *
 
 
@@ -190,7 +191,7 @@ CLASSIFICATION_DATA = {
  'Reliability': ['fault','robustness', 'multi-variant', 'divers', 'chaos', 'n-version', 'antifrag', 'heal','observability'], 
  'Fake': ['fake', 'decoy', 'honeypot'],
  'Curiosity': ['password'],
- 'WebAssemble': ['webassembly','wasm'],
+ 'WebAssembly': ['webassembly','wasm'],
 }
 
 
@@ -633,19 +634,22 @@ def is_high_reputation(url):
     if "linkinghub.elsevier.com" in url: return True
     if "diva-portal.org" in url: return True
     if "hal.science" in url: return True
+    if "ojs.aaai.org" in url: return True
     return False
 
 def get_doi_target(doi):
     # https://doi.org/api/handles/10.1145/3597503.3623337
     url = f"https://doi.org/api/handles/{doi}"
     data = requests.get(url).json()
-    for i in data["values"]:
-        if i["type"] == "URL":
-            return i["data"]["value"]
+    if data["responseCode"] == 1:
+        for i in data["values"]:
+            if i["type"] == "URL":
+                return i["data"]["value"]
     raise Exception("doi not found")
 
 def collect_paper_data_from_doi(doi):
-    return collect_paper_data_from_url(get_doi_target(url))
+    assert len(doi)>0
+    return collect_paper_data_from_url(get_doi_target(doi))
 
 def collect_paper_data_from_url_with_cache(url):
     urlseen, thepath = already_seen_url(url,"/home/martin/workspace/scholar-harvest/cache/collect_paper_data_from_url_with_cache/")
@@ -741,15 +745,20 @@ def collect_paper_data_from_url(url):
     note = None
     if "/doi.org/" in url:
         doi = url.replace("https://doi.org/","").replace("http://doi.org/","")
-        return collect_paper_data_from_doi(doi)
+        try:
+            return collect_paper_data_from_doi(doi)
+        except Exception as e:
+            print("doi error",doi)
         
     if "arxiv.org" in url:    
         ## https://www.monperrus.net/martin/arxiv-json.py?id=2304.12015
         semanticscholarid="url:"+url.replace("/html/","/pdf/")
         components = [x for x in url.split("/") if len(x)>0]
-        arxiv_id = components[-1]
+        arxiv_id = components[-1].split("?")[0]
         # https://www.monperrus.net/martin/arxiv-json.py?id=2409.18952v1
-        arxiv_metadata = requests.get("https://www.monperrus.net/martin/arxiv-json.py?id="+arxiv_id).json()
+        theurl = "https://www.monperrus.net/martin/arxiv-json.py?id="+arxiv_id
+        # print(theurl)
+        arxiv_metadata = requests.get(theurl).json()
         abstract = arxiv_metadata["summary"].replace("\n"," ")
         authors = ", ".join([x["name"] for x in arxiv_metadata["author"]])
         venue_title = arxiv_metadata["journal_ref"]
@@ -866,21 +875,37 @@ def collect_paper_data_from_url(url):
 
     if "ieeexplore.ieee.org" in url:
         # we can also get tldr for ieee papers
-        ieeeid = [x for x in url.split("/") if len(x)>0][-1]
+        if "abs_all.jsp" in url:
+            # parse url
+            components = urllib.parse.urlparse(url)
+            qdict = urllib.parse.parse_qs(components.query)
+            ieeeid = qdict["arnumber"][0]
+            # print(qdict)
+        else:
+            ieeeid = [x for x in url.split("/") if len(x)>0][-1]
         # curl "https://ieeexploreapi.ieee.org/api/v1/search/articles?apiKey=XXXXXX&article_number=10833642"
         resp = requests.get("https://ieeexploreapi.ieee.org/api/v1/search/articles?article_number="+ieeeid+"&apiKey="+config.ieeexplore_key)
         if resp.status_code != 418: # i'm a teapot, WTF?
-            ieeedata = resp.json()
+            print(resp.text)
+            try:
+                ieeedata = resp.json()
+            except Exception as e:
+                raise Exception("ieee error",resp.status_code,resp.text)
+                
             if "error" not in ieeedata and "articles" in ieeedata:
                 if "doi" in ieeedata["articles"][0]:
                     doi = ieeedata["articles"][0]["doi"]
                 venue_title = ieeedata["articles"][0]["publication_title"]
                 abstract = ieeedata["articles"][0]["abstract"]
+                # print ([x for x in ieeedata["articles"][0]["authors"]["authors"]])
+                # args the ["authors"]["authors"], bad data model
+                authors = ", ".join([x["full_name"] for x in ieeedata["articles"][0]["authors"]["authors"]])
+                title = ieeedata["articles"][0]["title"]                
                 # semanticscholarid="doi:"+doi
             else: print("no data in ieee "+json.dumps(ieeedata, indent=2))
             
         
-    # ok we can ask semanticscholarid for tldr
+    # if we have semanticscholarid,  we ask semanticscholarid for tldr and embedding
     if semanticscholarid!="" and ( \
         "arxiv.org" in url or "semanticscholar.org" in url or doi!=None)  \
     :
@@ -897,7 +922,7 @@ def collect_paper_data_from_url(url):
         if semanticscholar!=None and "authors" in semanticscholar:           
             authors = ", ".join([x["name"] for x in semanticscholar["authors"]])
             
-        if semanticscholar!=None and "embedding" in semanticscholar:           
+        if semanticscholar!=None and "embedding" in semanticscholar and semanticscholar["embedding"] and "vector" in semanticscholar["embedding"]:           
             note = "related:\n- "+"\n- ".join(rrs.search_in_pinecone_semanticscholar(title, semanticscholar["embedding"]["vector"], 5))
         #             # test of closest papers
         # closest = rrs.search_in_pinecone_str(paper.desc)
@@ -916,6 +941,7 @@ def collect_paper_data_from_url(url):
         try:
             crossref_data = requests.get("https://api.crossref.org/works/"+doi).json()
             venue_title = crossref_data["message"]["container-title"][0]+''
+            # authors = ", ".join([x["given"]+" "+x["family"] for x in crossref_data["message"]["author"]])
         except: pass
     
     return {
