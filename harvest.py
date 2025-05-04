@@ -886,7 +886,7 @@ def collect_paper_data_from_url(url):
         # curl "https://ieeexploreapi.ieee.org/api/v1/search/articles?apiKey=XXXXXX&article_number=10833642"
         resp = requests.get("https://ieeexploreapi.ieee.org/api/v1/search/articles?article_number="+ieeeid+"&apiKey="+config.ieeexplore_key)
         if resp.status_code != 418: # i'm a teapot, WTF?
-            print(resp.text)
+            # print(resp.text)
             try:
                 ieeedata = resp.json()
             except Exception as e:
