@@ -388,6 +388,61 @@ def record_paper_as_seen(paper, **kwargs):
         f.write(json.dumps(data))
 
 
+def get_zotero_translator_service_url(url):
+    """
+    seems that it always returns one single element
+    """
+    fname = path_on_disk_internal_v2(url, "/home/martin/workspace/scholar-harvest/cache/get_zotero_translator_service/")
+    if os.path.exists(fname):
+        with open(fname, "r") as f:
+            try:
+                # print(fname)
+                return json.load(f)
+            except Exception as e:
+                print("error loading json",fname)
+                raise e
+    resp = requests.post("https://t0guvf0w17.execute-api.us-east-1.amazonaws.com/Prod/web", data = url, headers ={"Content-Type": "text/plain"})
+    ## argh, Zotero sometimes return a list, sometimes a dictionary, that's really bad
+    # print(resp.status_code, resp.text)
+
+    # this is really a horrible API
+    if resp.status_code == 400 or resp.status_code == 500 or '"message"'  in resp.text or "No items returned from any translator" in resp.text:
+        result = []
+    else:
+        try:
+            data = resp.json()
+        except Exception as e:
+            print("error loading json",resp.text)
+            raise e
+
+        result = data # happy path
+
+        # the API of Zotero is not consistent, sometimes it returns a list, sometimes a dict
+        # probably because the individual translators arenot regularized
+        if not isinstance(data, list):
+            result = [data]
+
+        # force firstName lastName for all authors
+        for i in range(len(result)):
+            if "creators" in result[i]:
+                for o in range(len(result[i]["creators"])):
+                    if "name" in result[i]["creators"][o]:
+                        result[i]["creators"][o]["lastName"] = result[i]["creators"][o]["name"]
+                        result[i]["creators"][o]["firstName"] = ""
+                    if "firstName" not in result[i]["creators"][o]:
+                        raise Exception("no firstName in creator")
+                    if "lastName" not in result[i]["creators"][o]:
+                        raise Exception("no lastName in creator")
+
+        # print(data)
+
+
+    # save and return
+    with open(fname, "w") as f:
+        json.dump(result, f)
+    return result
+
+
 def get_cdsl_data(csdlid):
     """ get the data based on computer.org 
 can be used as follows
@@ -676,12 +731,18 @@ def info_from_crossref(doi):
     """
 
     crossref_data = requests.get(f"https://api.crossref.org/works/{doi}").json()
+    # print(json.dumps(crossref_data, indent=2))
     message = crossref_data.get("message", {})
     
     # Extract basic information
     title = message.get("title", [""])[0] if message.get("title") else ""
     doi = message.get("DOI", "")
     url = f"https://doi.org/{doi}" if doi else ""
+    # if resource/primary/URL use it
+    try:
+        url = message["resource"]["primary"]["URL"]
+    except:
+        pass
     
     # Extract authors
     authors = []
@@ -696,6 +757,16 @@ def info_from_crossref(doi):
     venue_title = ""
     if message.get("container-title"):
         venue_title = message.get("container-title", [""])[0]
+
+# "journal-issue": {
+    #   "issue": "FSE",
+    # Extract issue information
+    if message.get("journal-issue"):
+        if message["journal-issue"].get("issue"):
+            issue = message["journal-issue"]["issue"]
+            if issue and venue_title:
+                venue_title += f" ({issue})"
+        
     elif message.get("event", {}).get("name"):
         venue_title = message.get("event", {}).get("name", "")
     
@@ -707,8 +778,11 @@ def info_from_crossref(doi):
             published_date = "-".join(str(part) for part in date_parts)
     
     publisher = message.get("publisher", "")
-    note = f"Published: {published_date}, Publisher: {publisher}" if published_date or publisher else ""
+
+    note = ""
+    note = f"Published: {published_date}"
     
+    year = message.get("published", {}).get("date-parts", [[]])[0][0] if message.get("published") else ""
     # Create the formatted output
     formatted_output = {
         "url": url,
@@ -716,9 +790,10 @@ def info_from_crossref(doi):
         "semanticscholarid": "",  # Not available in CROSSREF data
         "abstract": "",  # Not available in CROSSREF data
         "tldr": "",  # Not available in CROSSREF data
-        "authors": authors,
+        "authors": ", ".join(authors),
         "venue_title": venue_title,
         "doi": doi,
+        "year": year,
         "note": note
     }
     
@@ -757,7 +832,7 @@ def collect_paper_data_from_url(url):
         arxiv_id = components[-1].split("?")[0]
         # https://www.monperrus.net/martin/arxiv-json.py?id=2409.18952v1
         theurl = "https://www.monperrus.net/martin/arxiv-json.py?id="+arxiv_id
-        # print(theurl)
+        print(theurl)
         arxiv_metadata = requests.get(theurl).json()
         abstract = arxiv_metadata["summary"].replace("\n"," ")
         authors = ", ".join([x["name"] for x in arxiv_metadata["author"]])
@@ -771,13 +846,17 @@ def collect_paper_data_from_url(url):
         dblp_id = "/".join(components[-3:])
         # added Jan 2025
         dblp_url = "https://www.monperrus.net/martin/dblp-json.py?id="+dblp_id
-        # print(dblp_url)
-        dblp_metadata = requests.get(dblp_url).json()
+        dblp_resp = requests.get(dblp_url)
+        # print(dblp_url, dblp_resp.status_code, dblp_resp.text) # debug
+        dblp_metadata = dblp_resp.json()
         venue_title = dblp_metadata["venue_title"]
         authors = ", ".join(dblp_metadata["author"])
         # DOI Chain from dblp
-        if "ee" in dblp_metatata:
-            return collect_paper_data_from_doi(dblp_metadata["ee"])
+        if "ee" in dblp_metadata and len(dblp_metadata["ee"])>0:
+            if "doi" in dblp_metadata["ee"][0]:
+                # print(dblp_metadata["ee"])
+                doi = dblp_metadata["ee"][0].replace("https://doi.org/","").replace("https://dx.doi.org/","")
+                return collect_paper_data_from_doi(doi)
         # if "doi.org" in dblp_metadata["ee"]:
         #     url = get_doi_target(dblp_metadata["ee"])
         # print("TODO implement DOI and chain for DBLP")
@@ -886,7 +965,7 @@ def collect_paper_data_from_url(url):
             ieeeid = qdict["arnumber"][0]
             # print(qdict)
         else:
-            ieeeid = [x for x in url.split("/") if len(x)>0][-1]
+            ieeeid = [x for x in url.split("/") if len(x)>0][-1].replace(".pdf","")
         # curl "https://ieeexploreapi.ieee.org/api/v1/search/articles?apiKey=XXXXXX&article_number=10833642"
         resp = requests.get("https://ieeexploreapi.ieee.org/api/v1/search/articles?article_number="+ieeeid+"&apiKey="+config.ieeexplore_key)
         if resp.status_code != 418: # i'm a teapot, WTF?
@@ -1028,7 +1107,7 @@ def notify_email(paper, service):
     # print(res)
 
     #print("unique_id", unique_id)
-    print("emailed", paper.desc, paper.category)
+    print("emailed", paper.category)
 
 def get_labelId(category):
     if category=="planetse": return "Label_816000980291680327"
