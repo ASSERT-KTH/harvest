@@ -207,6 +207,8 @@ class Paper:
         self.reason = []
         self.abstract = None
         self.note = None
+        self.category = None
+        self.categories = []
 
     def note_subject(self, subject):
         type_a = type_alert(subject)
@@ -688,7 +690,7 @@ def create_harvest_email_paper(paper, service, **kwargs):
     if "origin" in kwargs: origin = kwargs["origin"]
     detection_date = "unknown_detection_date"
     if "detection_date" in kwargs: detection_date = kwargs["detection_date"]
-    c
+    
     if already_seen(paper):
         return
     
@@ -704,8 +706,9 @@ def create_harvest_email_paper(paper, service, **kwargs):
         
     paper.origin = origin
     
-    category = compute_category_keywords(paper)
-    paper.category = category 
+    paper.categories = [x[1] for x in classify_internal_list(paper.desc)]
+
+    paper.category = paper.categories[0] 
 
     paper.detection_date = detection_date.isoformat()
 
@@ -941,7 +944,7 @@ def collect_paper_data_from_url(url):
         # if "doi.org" in dblp_metadata["ee"]:
         #     url = get_doi_target(dblp_metadata["ee"])
         # print("TODO implement DOI and chain for DBLP")
-        
+
     if "dl.acm.org" in url:
         components = [x for x in url.split("/") if len(x)>0]
         doi = components[-2]+"/"+components[-1]
@@ -1070,7 +1073,7 @@ def collect_paper_data_from_url(url):
             else: print("no data in ieee "+json.dumps(ieeedata, indent=2))
         
     if title == None:
-        # default from Zotero
+        # default from Zotero Translation Server
         return transform_zotero_to_output(get_zotero_translator_service_url(url))
             
     return {
@@ -1165,8 +1168,20 @@ def notify_email(paper, service):
     # Label_4447645605958895953 is label for harvest.py
     recorded = service.users().messages().insert(userId='me', body={
         'raw': 
-            base64.urlsafe_b64encode((header + email).encode("utf-8")).decode("utf-8"), "labelIds":['UNREAD', "Label_4447645605958895953", categories["readinglist - "+paper.category]["labelId"]]}).execute()
+            base64.urlsafe_b64encode((header + email).encode("utf-8")).decode("utf-8"), "labelIds":['UNREAD', "Label_4447645605958895953"]}).execute()
     recorded = service.users().messages().get(userId='me', id=recorded["id"], format='metadata', metadataHeaders=['Message-Id']).execute()
+
+
+    # add one more labelId tags to message id
+    category_label_ids = [get_labelId(x) for x in paper.categories]
+    if category_label_ids:
+        service.users().messages().modify(
+            userId='me', 
+            id=recorded["id"], 
+            body={'addLabelIds': category_label_ids}
+        ).execute()
+    
+
     rfc822msgid = recorded["payload"]["headers"][0]['value']
     
     # test of sending emails, it works
@@ -1214,7 +1229,6 @@ def compute_category_keywords(paper):
     reason_txt = paper.print_reason()
 
     pattern1, classification1 = classify_internal(title)    
-    increment_integer_in_file(pattern1)
 
     if classification1 != "uncategorized": return classification1
 
@@ -1225,16 +1239,23 @@ def compute_category_keywords(paper):
     return "uncategorized"
 
 def classify_internal(reason_txt):
+    # backward compatible
+    return classify_internal_list(reason_txt)[0]
+
+def classify_internal_list(reason_txt):
     reason_txt = reason_txt.lower()
+    results = []
      
     for THEME,j in CLASSIFICATION_DATA.items():
       for pattern in j:
         if pattern.lower() in reason_txt.lower(): 
-            return pattern,THEME
+            results.append((pattern,THEME))
     
-    
+    if len(results) == 0:
+        # ensure one
+        results.append(("unknownpattern","uncategorized"))
 
-    return "none", "uncategorized"
+    return results
 
 
 def increment_integer_in_file(file_path):
