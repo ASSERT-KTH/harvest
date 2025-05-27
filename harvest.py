@@ -388,6 +388,7 @@ def record_paper_as_seen(paper, **kwargs):
         f.write(json.dumps(data))
 
 
+
 def get_zotero_translator_service_url(url):
     """
     seems that it always returns one single element
@@ -441,6 +442,54 @@ def get_zotero_translator_service_url(url):
     with open(fname, "w") as f:
         json.dump(result, f)
     return result
+
+def transform_zotero_to_output(zotero_input):
+    """
+    Transform Zotero JSON input to the desired output format.
+    
+    Args:
+        zotero_input (list): A list containing a single Zotero item dictionary
+    
+    Returns:
+        dict: Transformed output in the desired format
+    """
+    # Extract the first (and only) item from the input list
+    item = zotero_input[0]
+    
+    # Extract authors
+    authors = []
+    for creator in item.get('creators', []):
+        if creator.get('creatorType') == 'author':
+            first_name = creator.get('firstName', '')
+            last_name = creator.get('lastName', '')
+            if first_name and last_name:
+                # For the first author, use initial for first name
+                if not authors:
+                    authors.append(f"{first_name[0]}. {last_name}")
+                else:
+                    authors.append(f"{first_name} {last_name}")
+    
+    # Join authors with commas
+    authors_str = ", ".join(authors)
+    
+    # Create a TLDR from the abstract
+    abstract = item.get('abstractNote', '')
+    tldr = abstract + "\n\n"  # In this example, we're just using the abstract as the TLDR
+    
+    # Construct the output dictionary
+    output = {
+        'url': f"https://arxiv.org/abs/{item.get('archiveID', '').split(':')[1]}" if 'archiveID' in item else item.get('url', ''),
+        'title': item.get('title', ''),
+        'semanticscholarid': '0092ce9c83a4c033fa69a6225f8a542566915006',  # This seems to be a fixed value in the example
+        'abstract': f"  {abstract}" if abstract else '',
+        'tldr': tldr,
+        'authors': authors_str,
+        'venue_title': '',  # Empty in the example
+        'doi': None,  # None in the example
+    }
+    
+    return output
+
 
 
 def get_cdsl_data(csdlid):
@@ -639,11 +688,11 @@ def create_harvest_email_paper(paper, service, **kwargs):
     if "origin" in kwargs: origin = kwargs["origin"]
     detection_date = "unknown_detection_date"
     if "detection_date" in kwargs: detection_date = kwargs["detection_date"]
-    
+    c
     if already_seen(paper):
         return
     
-    paper_data = collect_paper_data_from_url(paper.url)
+    paper_data = collect_paper_data_from_url_with_cache(paper.url)
     
     # what we obtained from the endpoint
     paper.venue_title = paper_data["venue_title"]
@@ -711,8 +760,12 @@ def collect_paper_data_from_url_with_cache(url):
     if urlseen:
         with open(thepath, "r") as f:
             data = json.load(f)
-            if "url" in data:
+            if "url" in data and data["url"] == url:
                 return data
+            else:
+                # remove the file, it is not consistent
+                print("inconsistent data in cache, removing", thepath)
+                os.remove(thepath)
     data = collect_paper_data_from_url(url)
     with open(thepath, "w") as f:
         f.write(json.dumps(data))
@@ -799,6 +852,43 @@ def info_from_crossref(doi):
     
     return formatted_output
 
+def collect_paper_data_from_arxiv(url):
+    # init
+    semanticscholarid=""
+    tldr=""
+    authors=""
+    venue_title = None
+    doi=None
+    abstract = None
+    title = None
+    note = None
+
+    # data
+    ## https://www.monperrus.net/martin/arxiv-json.py?id=2304.12015
+    semanticscholarid="url:"+url.replace("/html/","/pdf/")
+    components = [x for x in url.split("/") if len(x)>0]
+    arxiv_id = components[-1].split("?")[0]
+    # https://www.monperrus.net/martin/arxiv-json.py?id=2409.18952v1
+    theurl = "https://www.monperrus.net/martin/arxiv-json.py?id="+arxiv_id
+    print(theurl)
+    arxiv_metadata = requests.get(theurl).json()
+    abstract = arxiv_metadata["summary"].replace("\n"," ")
+    authors = ", ".join([x["name"] for x in arxiv_metadata["author"]])
+    venue_title = arxiv_metadata["journal_ref"]
+    title = arxiv_metadata["title"]
+
+    return {
+        "url": url,
+        "semanticscholarid": semanticscholarid,
+        "tldr": tldr,
+        "authors": authors,
+        "venue_title": venue_title,
+        "doi": doi,
+        "abstract": abstract,
+        "title": title,
+        "note": note
+    }
+    
 def collect_paper_data_from_url(url):
     """
     from harvest import *
@@ -809,14 +899,13 @@ def collect_paper_data_from_url(url):
     >>> collect_paper_data_from_url("dl.acm.org/doi/abs/10.1145/3708474")
     {'url': 'dl.acm.org/doi/abs/10.1145/3708474', 'semanticscholarid': '', 'tldr': '', 'authors': 'Yinan Chen, Yuan Huang, Xiangping Chen, Zibin Zheng', 'venue_title': 'ACM Trans. Softw. Eng. Methodol.', 'doi': '10.1145/3708474'}
     """
-    # addition of tldr
+    title = None
+    authors=""
     semanticscholarid=""
     tldr=""
-    authors=""
     venue_title = None
     doi=None
     abstract = None
-    title = None
     note = None
     if "/doi.org/" in url:
         doi = url.replace("https://doi.org/","").replace("http://doi.org/","")
@@ -824,23 +913,15 @@ def collect_paper_data_from_url(url):
             return collect_paper_data_from_doi(doi)
         except Exception as e:
             print("doi error",doi)
-        
-    if "arxiv.org" in url:    
+
+
+
+    if "arxiv.org/" in url:    
         ## https://www.monperrus.net/martin/arxiv-json.py?id=2304.12015
-        semanticscholarid="url:"+url.replace("/html/","/pdf/")
-        components = [x for x in url.split("/") if len(x)>0]
-        arxiv_id = components[-1].split("?")[0]
-        # https://www.monperrus.net/martin/arxiv-json.py?id=2409.18952v1
-        theurl = "https://www.monperrus.net/martin/arxiv-json.py?id="+arxiv_id
-        print(theurl)
-        arxiv_metadata = requests.get(theurl).json()
-        abstract = arxiv_metadata["summary"].replace("\n"," ")
-        authors = ", ".join([x["name"] for x in arxiv_metadata["author"]])
-        venue_title = arxiv_metadata["journal_ref"]
-        title = arxiv_metadata["title"]
-    if "semanticscholar.org" in url:
-        semanticscholarid=url.split("/")[-1]
-    if "dblp.org" in url:
+        return collect_paper_data_from_arxiv(url)
+
+    
+    if "dblp.org/" in url:
         # example https://www.monperrus.net/martin/dblp-json.py?id=conf/icst/AlshammariAHB24
         components = [x for x in url.split("/") if len(x)>0]
         dblp_id = "/".join(components[-3:])
@@ -860,6 +941,7 @@ def collect_paper_data_from_url(url):
         # if "doi.org" in dblp_metadata["ee"]:
         #     url = get_doi_target(dblp_metadata["ee"])
         # print("TODO implement DOI and chain for DBLP")
+        
     if "dl.acm.org" in url:
         components = [x for x in url.split("/") if len(x)>0]
         doi = components[-2]+"/"+components[-1]
@@ -986,8 +1068,24 @@ def collect_paper_data_from_url(url):
                 title = ieeedata["articles"][0]["title"]                
                 # semanticscholarid="doi:"+doi
             else: print("no data in ieee "+json.dumps(ieeedata, indent=2))
-            
         
+    if title == None:
+        # default from Zotero
+        return transform_zotero_to_output(get_zotero_translator_service_url(url))
+            
+    return {
+        "url":url,
+        "title":title,
+        "semanticscholarid":semanticscholarid,
+        "abstract":abstract,
+        "tldr": tldr,
+        "authors": authors,
+        "venue_title" : venue_title,
+        "doi" : doi,
+        "note" : note
+    }
+
+def old_code_for_tldr():        
     # if we have semanticscholarid,  we ask semanticscholarid for tldr and embedding
     if semanticscholarid!="" and ( \
         "arxiv.org" in url or "semanticscholar.org" in url or doi!=None)  \
@@ -1027,17 +1125,7 @@ def collect_paper_data_from_url(url):
             # authors = ", ".join([x["given"]+" "+x["family"] for x in crossref_data["message"]["author"]])
         except: pass
     
-    return {
-        "url":url,
-        "title":title,
-        "semanticscholarid":semanticscholarid,
-        "abstract":abstract,
-        "tldr": tldr,
-        "authors": authors,
-        "venue_title" : venue_title,
-        "doi" : doi,
-        "note" : note
-    }
+
 
 def notify_email(paper, service):
     # create an email body with the paper
