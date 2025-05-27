@@ -682,9 +682,9 @@ def get_cdsl_doi(csdlid):
 
 def create_harvest_email_paper(paper, service, **kwargs):
     assert paper.url.startswith("http")
-    if not is_high_reputation(paper.url):
-        print("no reputation for "+paper.url)
-        return False
+    # if not is_high_reputation(paper.url):
+    #     print("no reputation for "+paper.url)
+    #     return False
 
     origin = ""
     if "origin" in kwargs: origin = kwargs["origin"]
@@ -692,10 +692,14 @@ def create_harvest_email_paper(paper, service, **kwargs):
     if "detection_date" in kwargs: detection_date = kwargs["detection_date"]
     
     if already_seen(paper):
-        return
+        return False
     
-    paper_data = collect_paper_data_from_url_with_cache(paper.url)
+    paper_data = collect_paper_data_from_url(paper.url)
     
+    if paper_data["title"] == None or paper_data["title"] == "":
+        print("no data available for "+paper.url)
+        return False
+
     # what we obtained from the endpoint
     paper.venue_title = paper_data["venue_title"]
     paper.url = paper_data["url"] # for some paper we replace with a better url (eg computer.org)
