@@ -34,9 +34,13 @@ import json
 import config
 import sys
 from urllib.parse import urlparse
-from harvest_lib import *
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+
+
+from harvest_lib import *
+from semanticscholar_lib import *
+
 
 
 # ollama pull jeffh/intfloat-multilingual-e5-large-instruct:f16
@@ -357,16 +361,6 @@ class ScholarScraper():
         #print(unknown_reasons)
         print()
 
-def DEPRECATED_path_on_disk_internal_v1(papertitle, prefix):
-    assert prefix.endswith("/")
-    """ DEPRECATED SEE V2 """
-    # remove trailing space and trailing dots from paper.desc
-    papertitle = papertitle.strip().rstrip(".").replace("   "," ").replace("  "," ")
-    return prefix+hashlib.sha256(papertitle.encode("utf-8")).hexdigest()+".json"
-def path_on_disk(paper):
-    return path_on_disk_internal(paper.desc)
-def path_on_disk_internal(papertitle, prefix = "/home/martin/workspace/scholar-harvest/cache/harvest/"):
-    return path_on_disk_internal_v2(papertitle, prefix)
 
 def already_seen_url(url, prefix):
     """
@@ -684,9 +678,6 @@ def get_cdsl_doi(csdlid):
 
 def create_harvest_email_paper(paper, service, **kwargs):
     assert paper.url.startswith("http")
-    # if not is_high_reputation(paper.url):
-    #     print("no reputation for "+paper.url)
-    #     return False
 
     origin = ""
     if "origin" in kwargs: origin = kwargs["origin"]
@@ -697,6 +688,15 @@ def create_harvest_email_paper(paper, service, **kwargs):
         return False
     
     paper_data = collect_paper_data_from_url(paper.url)
+
+    # getting the embedding
+    try:
+        # from semanticscholar_lib
+        semanticscholar = get_embedding(paper_data["title"])
+        paper_data["note"]  = "related:\n- "+"\n- ".join(rrs.search_in_pinecone_semanticscholar(title, semanticscholar["embedding"]["vector"], 5))
+        print("got an embedding for "+paper["url"])
+    except Exception as e:
+        print("error getting embedding for "+paper.url, e)
     
     if paper_data["title"] == None or paper_data["title"] == "":
         print("no API metadata available for "+paper.url)
@@ -879,7 +879,7 @@ def collect_paper_data_from_arxiv(url):
     arxiv_id = components[-1].split("?")[0]
     # https://www.monperrus.net/martin/arxiv-json.py?id=2409.18952v1
     theurl = "https://www.monperrus.net/martin/arxiv-json.py?id="+arxiv_id
-    print(theurl)
+    #print(theurl)
     arxiv_metadata = requests.get(theurl).json()
     abstract = arxiv_metadata["summary"].replace("\n"," ")
     authors = ", ".join([x["name"] for x in arxiv_metadata["author"]])
@@ -986,13 +986,14 @@ def collect_paper_data_from_url(url):
         # GET https://api.springernature.com/meta/v2/json?api_key=YOUR_API_KEY&q=doi:YOUR_DOI
         springer_url = f"https://api.springernature.com/meta/v2/json?api_key={config.springernature_key}&q=doi:{doi}"
         springer_data = requests.get(springer_url).json()
-        if len(springer_data["records"])>0:
+        if "records" in springer_data and len(springer_data["records"])>0:
             # print(url)
             paper_data = springer_data["records"][0]
             venue_title=paper_data["publicationName"]
             abstract=paper_data["abstract"]
             title=paper_data["title"]
             authors = " - ".join([x["creator"] for x in paper_data["creators"]])
+        else: print("no records found in Springer "+url)
 
         # print(springer_data)
         
