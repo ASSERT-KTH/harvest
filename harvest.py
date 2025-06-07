@@ -35,6 +35,8 @@ import config
 import sys
 from urllib.parse import urlparse
 from harvest_lib import *
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 
 # ollama pull jeffh/intfloat-multilingual-e5-large-instruct:f16
@@ -85,16 +87,15 @@ def type_alert(subject):
 CLASSIFICATION_DATA = {
  'uncategorized': [],
  'Program Repair': ['repair',
+                    'bug', # matcheds debug
                     'fix',
                     'patch',
-                    'bug',
-                    'debug', # already in "bug" but that's clear
                     'overfitting'
                     ],
- 'Vulnerability': [
+ 'Vulnerability': [ # vivi
                     ' go ',
                     'golang',
-                    'vulnerabil' # vivi
+                    'vulnerabil' 
                     ],
  'Chains': [ 'supply chain',
             'protection',
@@ -103,6 +104,7 @@ CLASSIFICATION_DATA = {
             'package',
             'librar',
             'dependenc',
+            'compatib',
             'break',
             'sbom',
             'bill',
@@ -118,7 +120,6 @@ CLASSIFICATION_DATA = {
             'build',
             'air-gap',
             'compromise',
-            'compatib',
             'sigstore'],
  'Smart contracts': ['blockchain',
                      'transaction',
@@ -127,6 +128,7 @@ CLASSIFICATION_DATA = {
                      'bitcoin',
                      'ethereum',
                      'solidity',
+                     'web3',
                      'evm',
                      'dapp',
                      'exploit generation',
@@ -150,10 +152,10 @@ CLASSIFICATION_DATA = {
                      'gigahorse',
                      ],
  'LLM on code': [
+                 'learn',
                  'llm',
                  'neural',
                  'predict',
-                 'learn',
                  'generative',
                  'transformer',
                  'prompt',
@@ -182,13 +184,13 @@ CLASSIFICATION_DATA = {
                     'merge',
                     'differencing', 'compil', 'analysis', 'fuzz', 'transform'],
  'Testing': ['test', 'oracle', 'metamorphic', 'mutant'],
+ 'Reliability': ['fault','robustness', 'multi-variant', 'divers', 'chaos', 'n-version', 'antifrag', 'heal','observability'], 
  'LLM general': ['language model', 
                  'pre-training', 
                  'toolformer',
                  'jigsaw',
                  'langchain',
                  'talm'],
- 'Reliability': ['fault','robustness', 'multi-variant', 'divers', 'chaos', 'n-version', 'antifrag', 'heal','observability'], 
  'Fake': ['fake', 'decoy', 'honeypot'],
  'Curiosity': ['password'],
  'WebAssembly': ['webassembly','wasm'],
@@ -697,7 +699,7 @@ def create_harvest_email_paper(paper, service, **kwargs):
     paper_data = collect_paper_data_from_url(paper.url)
     
     if paper_data["title"] == None or paper_data["title"] == "":
-        print("no data available for "+paper.url)
+        print("no API metadata available for "+paper.url)
         return False
 
     # what we obtained from the endpoint
@@ -706,11 +708,11 @@ def create_harvest_email_paper(paper, service, **kwargs):
     paper.tldr = paper_data["tldr"]
     paper.authors = paper_data["authors"]
     paper.abstract = paper_data["abstract"]
-    paper.note = paper_data["note"]
+    paper.note = paper_data["note"] if "note" in paper_data else ""
         
     paper.origin = origin
     
-    paper.categories = [x[1] for x in classify_internal_list(paper.desc)]
+    paper.categories = [x[1] for x in compute_category_keywords_paper(paper)]
 
     paper.category = paper.categories[0] 
 
@@ -898,13 +900,7 @@ def collect_paper_data_from_arxiv(url):
     
 def collect_paper_data_from_url(url):
     """
-    from harvest import *
-    print(collect_paper_data_from_url("https://www.sciencedirect.com/science/article/pii/S0950584924002593"))
-    >>> collect_paper_data_from_url("https://www.sciencedirect.com/science/article/pii/S0950584924002593")
-    {'url': 'https://www.sciencedirect.com/science/article/pii/S0950584924002593', 'semanticscholarid': '', 'tldr': '', 'authors': '', 'venue_title': 'Information and Software Technology', 'doi': '10.1016/j.infsof.2024.107654'}
-        
-    >>> collect_paper_data_from_url("dl.acm.org/doi/abs/10.1145/3708474")
-    {'url': 'dl.acm.org/doi/abs/10.1145/3708474', 'semanticscholarid': '', 'tldr': '', 'authors': 'Yinan Chen, Yuan Huang, Xiangping Chen, Zibin Zheng', 'venue_title': 'ACM Trans. Softw. Eng. Methodol.', 'doi': '10.1145/3708474'}
+
     """
     title = None
     authors=""
@@ -929,16 +925,21 @@ def collect_paper_data_from_url(url):
 
     
     if "dblp.org/" in url:
+        # https://dblp.org/rec/conf/icst/AlshammariAHB24.xml
         # example https://www.monperrus.net/martin/dblp-json.py?id=conf/icst/AlshammariAHB24
         components = [x for x in url.split("/") if len(x)>0]
         dblp_id = "/".join(components[-3:])
+        # print("dblp_id",dblp_id)
         # added Jan 2025
         dblp_url = "https://www.monperrus.net/martin/dblp-json.py?id="+dblp_id
+        # print(dblp_url)
+        
         dblp_resp = requests.get(dblp_url)
         # print(dblp_url, dblp_resp.status_code, dblp_resp.text) # debug
         dblp_metadata = dblp_resp.json()
         venue_title = dblp_metadata["venue_title"]
         authors = ", ".join(dblp_metadata["author"])
+        # print(dblp_metadata)
         # DOI Chain from dblp
         if "ee" in dblp_metadata and len(dblp_metadata["ee"])>0:
             if "doi" in dblp_metadata["ee"][0]:
@@ -975,6 +976,7 @@ def collect_paper_data_from_url(url):
                 authors = ", ".join([x["given"]+" "+x["family"] for x in r["items"][0][doi]["author"]])
             except: pass
         # print("acm.org TODO implement call to https://dl.acm.org/action/exportCiteProcCitation")
+
     if "link.springer.com" in url:
         # example url-analysis.py http://link.springer.com/10.1007/s11219-025-09709-4
         components = [x for x in url.split("/") if len(x)>0]
@@ -1075,10 +1077,15 @@ def collect_paper_data_from_url(url):
                 title = ieeedata["articles"][0]["title"]                
                 # semanticscholarid="doi:"+doi
             else: print("no data in ieee "+json.dumps(ieeedata, indent=2))
-        
+
+    if "semanticscholar.org/" in url:
+        return collect_paper_data_from_semanticscholar(url)
+
     if title == None:
         # default from Zotero Translation Server
-        return transform_zotero_to_output(get_zotero_translator_service_url(url))
+        zotero_data = get_zotero_translator_service_url(url)
+        if zotero_data != None and len(zotero_data)>0:
+            return transform_zotero_to_output(zotero_data)
             
     return {
         "url":url,
@@ -1091,6 +1098,34 @@ def collect_paper_data_from_url(url):
         "doi" : doi,
         "note" : note
     }
+
+def collect_paper_data_from_semanticscholar(url):
+    title = None
+    semanticscholarid = url.split("?")[0].split("/")[-1]
+    semanticscholar = requests.get("https://api.semanticscholar.org/graph/v1/paper/"+semanticscholarid+"?fields=title,tldr,authors,externalIds,embedding,embedding.specter_v2", headers = {"x-api-key": config.semanticscholar_key}).json()        
+    tldr=semanticscholar["tldr"]["text"]+"\n\n" if "tldr" in semanticscholar and semanticscholar["tldr"] and semanticscholar["tldr"]["text"]  else ""
+    if semanticscholar!=None and "authors" in semanticscholar:           
+        authors = ", ".join([x["name"] for x in semanticscholar["authors"]])
+    if semanticscholar!=None and "title" in semanticscholar:           
+        title = semanticscholar["title"]
+
+    doi = None
+    if "externalIds" in semanticscholar:
+        if "DOI" in semanticscholar["externalIds"]:
+            doi = semanticscholar["externalIds"]["DOI"]
+
+    return {
+        "url": url,
+        "title": title,
+        "semanticscholarid": semanticscholarid,
+        "abstract": "",  # not available in the API
+        "tldr": tldr,
+        "authors": authors,
+        "venue_title" : "",  # not available in the API
+        "doi" : doi,  # not available in the API
+        "note" : ""  # not available in the API
+    }
+
 
 def old_code_for_tldr():        
     # if we have semanticscholarid,  we ask semanticscholarid for tldr and embedding
@@ -1170,9 +1205,40 @@ def notify_email(paper, service):
 
     # create a new email
     # Label_4447645605958895953 is label for harvest.py
+    # Create HTML email content
+    html_body = f"""<html>
+<body>
+<h2>{paper.desc}</h2>
+<p><a href="{paper.url}">{paper.url}</a></p>
+{f"<p><strong>Venue:</strong> {paper.venue_title}</p>" if paper.venue_title else ""}
+{f"<p><strong>TLDR:</strong> {paper.tldr}</p>" if paper.tldr else ""}
+{f"<p><strong>Abstract:</strong> {paper.abstract}</p>" if paper.abstract else ""}
+{f"<p><strong>Authors:</strong> {paper.authors}</p>" if paper.authors else ""}
+<p><strong>Category:</strong> {paper.category}</p>
+<p><strong>Reason:</strong> {paper.print_reason()}</p>
+{f"<p><strong>Origin:</strong> {paper.origin}</p>" if paper.origin else ""}
+</body>
+</html>"""
+    
+    # Create multipart message with both text and HTML
+    
+    msg = MIMEMultipart('alternative')
+    msg['From'] = 'harvest@monperrus.net'
+    msg['To'] = 'martin.monperrus@gmail.com'
+    msg['Subject'] = paper.desc
+    
+    # Add text version
+    # text_part = MIMEText(email, 'plain', 'utf-8')
+    # msg.attach(text_part)
+    
+    # Add HTML version
+    html_part = MIMEText(html_body, 'html', 'utf-8')
+    msg.attach(html_part)
+    
     recorded = service.users().messages().insert(userId='me', body={
-        'raw': 
-            base64.urlsafe_b64encode((header + email).encode("utf-8")).decode("utf-8"), "labelIds":['UNREAD', "Label_4447645605958895953"]}).execute()
+        'raw': base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8"), 
+        "labelIds":['UNREAD', "Label_4447645605958895953"]
+    }).execute()
     recorded = service.users().messages().get(userId='me', id=recorded["id"], format='metadata', metadataHeaders=['Message-Id']).execute()
 
 
@@ -1241,6 +1307,39 @@ def compute_category_keywords(paper):
     if classification2 != "uncategorized": return classification2
 
     return "uncategorized"
+
+def compute_category_keywords_paper(paper):
+    """
+      classify the paper based on keywords
+      categorize according to function classify_internal
+    """
+
+    title = paper.desc.lower()
+    reason_txt = paper.print_reason()
+
+    l1 = classify_internal_list(title)    
+    classes = set()
+    results = []
+    for pattern, classification in l1:
+        if classification != "uncategorized" and classification not in classes:
+            results.append((pattern, classification))
+            classes.add(classification)
+            
+    if len(results) == 0:
+        l2 = classify_internal_list(reason_txt)    
+        for pattern, classification in l2:
+    
+            if classification != "uncategorized" and classification not in classes:
+                results.append((pattern, classification))
+                classes.add(classification)
+                
+
+    if len(results) == 0:
+        # ensure one
+        results.append(("unknownpattern","uncategorized"))
+
+    return results
+
 
 def classify_internal(reason_txt):
     # backward compatible
