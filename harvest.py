@@ -7,12 +7,10 @@
 # TODO: add support for searching in the main search engines
 # TODO: document the past matches on a web page
 # 
-# To make stats of reasons, as easy as jq .reason cache/*.json | freqlines
-# grep -l "Evaluating large language models trained on code" cache/*.json | xargs rm 
+# To make stats of reasons, as easy as jq .reason cache/harvest/*.json | freqlines
 #
 #  new search by scholar: curl -X GET "https://api.semanticscholar.org/graph/v1/snippet/search?query=program+repair+by+removing+the+mandatory+presence&limit=10" -H "x-api-key: "
 # return the section and snippet, quite useful
-
 # Author: Martin Monperrus
 
 from __future__ import print_function
@@ -181,7 +179,7 @@ CLASSIFICATION_DATA = {
                  'AI code',
                  'models of source code',
                  'python-state-changes', # dataset
-                 'translation'],
+                 'translat'],
  'Code analysis': [ 'spoon',
                     'dataset',
                     'benchmark',
@@ -694,6 +692,7 @@ def create_harvest_email_paper(paper, service, **kwargs):
         # from semanticscholar_lib
         semanticscholar = get_embedding(paper_data["title"])
         paper_data["note"]  = "related:\n- "+"\n- ".join(rrs.search_in_pinecone_semanticscholar(title, semanticscholar["embedding"]["vector"], 5))
+        paper_data["tldr"] = semanticscholar["tldr"] if "tldr" in semanticscholar else ""
         print("got an embedding for "+paper["url"])
     except Exception as e:
         print("error getting embedding for "+paper.url, e)
@@ -1209,15 +1208,16 @@ def notify_email(paper, service):
     # Create HTML email content
     html_body = f"""<html>
 <body>
-<h2>{paper.desc}</h2>
-<p><a href="{paper.url}">{paper.url}</a></p>
+<p><strong>{paper.desc}</strong><br/>
+<a href="{paper.url}">{paper.url}</a></p>
 {f"<p><strong>Venue:</strong> {paper.venue_title}</p>" if paper.venue_title else ""}
 {f"<p><strong>TLDR:</strong> {paper.tldr}</p>" if paper.tldr else ""}
 {f"<p><strong>Abstract:</strong> {paper.abstract}</p>" if paper.abstract else ""}
 {f"<p><strong>Authors:</strong> {paper.authors}</p>" if paper.authors else ""}
 <p><strong>Category:</strong> {paper.category}</p>
 <p><strong>Reason:</strong> {paper.print_reason()}</p>
-{f"<p><strong>Origin:</strong> {paper.origin}</p>" if paper.origin else ""}
+{f"<p><strong>Related:</strong> {paper.note}</p>" if paper.note else ""}
+{f"<!--<p><strong>Origin:</strong> {paper.origin}</p>-->" if paper.origin else ""}
 </body>
 </html>"""
     

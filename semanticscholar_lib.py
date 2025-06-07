@@ -104,7 +104,7 @@ def get_embedding(title, output_dir='/home/martin/workspace/scholar-harvest/cach
         semanticscholarid = resp["data"][0]["paperId"]
         
         # Get embeddings
-        url = f"https://api.semanticscholar.org/graph/v1/paper/{semanticscholarid}?fields=title,citationCount,embedding,embedding.specter_v2"
+        url = f"https://api.semanticscholar.org/graph/v1/paper/{semanticscholarid}?fields=title,tldr,citationCount,embedding,embedding.specter_v2"
         resp = requests.get(url, headers={"x-api-key": config.semanticscholar_key})
         semanticscholarfull = resp.json()
         # Respect rate limits
