@@ -686,20 +686,22 @@ def create_harvest_email_paper(paper, service, **kwargs):
         return False
     
     paper_data = collect_paper_data_from_url(paper.url)
-
-    # getting the embedding
-    try:
-        # from semanticscholar_lib
-        semanticscholar = get_embedding(paper_data["title"])
-        paper_data["note"]  = "related:\n- "+"\n- ".join(rrs.search_in_pinecone_semanticscholar(title, semanticscholar["embedding"]["vector"], 5))
-        paper_data["tldr"] = semanticscholar["tldr"] if "tldr" in semanticscholar else ""
-        print("got an embedding for "+paper["url"])
-    except Exception as e:
-        print("error getting embedding for "+paper.url, e)
-    
+    # is this does not work
     if paper_data["title"] == None or paper_data["title"] == "":
         print("no API metadata available for "+paper.url)
         return False
+
+    try:
+        # getting the embedding  from semanticscholar_lib
+        semanticscholar = get_embedding(paper_data["title"])
+        if semanticscholar["embedding"] and semanticscholar["embedding"]["vector"]:
+            paper_data["note"]  = "related:\n- "+"\n- ".join(rrs.search_in_pinecone_semanticscholar(paper_data["title"], semanticscholar["embedding"]["vector"], 5))
+            paper_data["tldr"] = semanticscholar["tldr"]["text"] if "tldr" in semanticscholar else ""
+            print("got an embedding for "+paper_data["url"])
+    except Exception as e:
+        raise e
+        print("error getting embedding for "+paper.url, e)
+
 
     # what we obtained from the endpoint
     paper.venue_title = paper_data["venue_title"]
@@ -1216,7 +1218,7 @@ def notify_email(paper, service):
 {f"<p><strong>Authors:</strong> {paper.authors}</p>" if paper.authors else ""}
 <p><strong>Category:</strong> {paper.category}</p>
 <p><strong>Reason:</strong> {paper.print_reason()}</p>
-{f"<p><strong>Related:</strong> {paper.note}</p>" if paper.note else ""}
+{f"<pre>{paper.note}</pre>" if paper.note else ""}
 {f"<!--<p><strong>Origin:</strong> {paper.origin}</p>-->" if paper.origin else ""}
 </body>
 </html>"""
