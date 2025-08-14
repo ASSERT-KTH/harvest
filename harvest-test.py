@@ -164,6 +164,22 @@ def test_collect_paper_data_from_semanticscholar():
     assert paper_data['authors'] == 'Valeria Pontillo, Maarten Vandercammen, Sarah Verbelen, Coen De Roover'
 
     
+def test_collect_paper_data_from_mdpi():
+    """
+     pytest harvest-test.py -k 'test_collect_paper_data_from_mdpi'
+    """
+    pass
+    paper_data = collect_paper_data_from_url("https://www.mdpi.com/2624-6511/8/4/118")
+    # {'url': 'https://www.mdpi.com/2624-6511/8/4/118', 'title': 'Generative AI-Driven Smart Contract Optimization for Secure and Scalable Smart City Services', 'semanticscholarid': '', 'abstract': 'Smart cities use advanced infrastructure and technology to improve the quality of life for their citizens. Collaborative services in smart cities are making the smart city ecosystem more reliable. These services are required to enhance the operation of interoperable systems, such as smart transportation services that share their data with smart safety services to execute emergency response, surveillance, and criminal prevention measures. However, an important issue in this ecosystem is data security, which involves the protection of sensitive data exchange during the interoperability of heterogeneous smart services. Researchers have addressed these issues through blockchain integration and the implementation of smart contracts, where collaborative applications can enhance both the efficiency and security of the smart city ecosystem. Despite these facts, complexity is an issue in smart contracts since complex coding associated with their deployment might influence the performance and scalability of collaborative applications in interconnected systems. These challenges underscore the need to optimize smart contract code to ensure efficient and scalable solutions in the smart city ecosystem. In this article, we propose a new framework that integrates generative AI with blockchain in order to eliminate the limitations of smart contracts. We make use of models such as GPT-2, GPT-3, and GPT4, which natively can write and optimize code in an efficient manner and support multiple programming languages, including Python 3.12.x and Solidity. To validate our proposed framework, we integrate these models with already existing frameworks for collaborative smart services to optimize smart contract code, reducing resource-intensive processes while maintaining security and efficiency. Our findings demonstrate that GPT-4-based optimized smart contracts outperform other optimized and non-optimized approaches. This integration reduces smart contract execution overhead, enhances security, and improves scalability, paving the way for a more robust and efficient smart contract ecosystem in smart city applications.', 'tldr': '', 'authors': 'Sameer Misbah, Muhammad Farrukh Shahid, Shahbaz Siddiqui, Tariq Jamil S. Khanzada, Rehab Bahaaddin Ashari, Zahid Ullah, Mona Jamjoom', 'venue_title': 'Smart Cities', 'doi': '10.3390/smartcities8040118', 'note': None}
+    
+    # Assert that paper_data is a dictionary with the expected keys
+    assert isinstance(paper_data, dict)
+    assert paper_data['title'] == 'Generative AI-Driven Smart Contract Optimization for Secure and Scalable Smart City Services'
+    assert 'Smart cities use advanced infrastructure' in paper_data['abstract']
+    assert paper_data['authors'] == 'Sameer Misbah, Muhammad Farrukh Shahid, Shahbaz Siddiqui, Tariq Jamil S. Khanzada, Rehab Bahaaddin Ashari, Zahid Ullah, Mona Jamjoom'
+    assert paper_data['venue_title'] == 'Smart Cities'
+    assert paper_data['doi'] == '10.3390/smartcities8040118'
+
 
 
 def main():

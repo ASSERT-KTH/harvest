@@ -164,7 +164,7 @@ def get_paper_info_from_semantic_scholar_id(semanticscholarid):
     # fieldsOfStudy cool
     # tldr
 
-    url = "https://api.semanticscholar.org/graph/v1/paper/"+semanticscholarid+"?fields=title,authors,year,externalIds,fieldsOfStudy,tldr"
+    url = "https://api.semanticscholar.org/graph/v1/paper/"+semanticscholarid+"?fields=title,authors,year,venue,externalIds,fieldsOfStudy,tldr"
     semanticscholar = requests.get(url, headers={"x-api-key": config.semanticscholar_key})
     data = semanticscholar.json()
     with open(fname, "w") as f:
@@ -176,20 +176,23 @@ class SemanticScholarNotFound(Exception):
     def __init__(self, message):
         self.message = message
         super().__init__(self.message)
+        
 def get_url_from_title(title):
     result = get_semantic_scholar_id_from_title(title)
-    if "data" not in result:
+    # print(result)
+    if "paperId" not in result:
         raise SemanticScholarNotFound("No data found for title: " + title)
-    if normalize_title(result["data"][0]["title"]) == normalize_title(title):
+    if normalize_title(result["title"]) == normalize_title(title):
         # print("Title matches: " + result["data"][0]["title"])
-        data = get_paper_info_from_semantic_scholar_id(result["data"][0]["paperId"])
-        # print(data)
+        data = get_paper_info_from_semantic_scholar_id(result["paperId"])
+        print(data)
         if "externalIds" in data:
             if "DOI" in data["externalIds"]:
                 # print("DOI: " + data["externalIds"]["DOI"])
                 try:
                     return get_doi_target(data["externalIds"]["DOI"])
                 except Exception as e:
+                    raise e
                     return "https://doi.org/" + data["externalIds"]["DOI"]
             elif "ArXiv" in data["externalIds"]:
                 return "https://arxiv.org/abs/" + data["externalIds"]["ArXiv"]

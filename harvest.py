@@ -480,7 +480,7 @@ def transform_zotero_to_output(zotero_input):
         'abstract': f"  {abstract}" if abstract else '',
         'tldr': tldr,
         'authors': authors_str,
-        'venue_title': '',  # Empty in the example
+        'venue_title': item.get('publicationTitle', ''),
         'doi': None,  # None in the example
     }
     
@@ -694,10 +694,12 @@ def create_harvest_email_paper(paper, service, **kwargs):
     try:
         # getting the embedding  from semanticscholar_lib
         semanticscholar = get_embedding(paper_data["title"])
-        if semanticscholar["embedding"] and semanticscholar["embedding"]["vector"]:
+        paper_data["tldr"] = ""
+        if semanticscholar and semanticscholar["embedding"] and semanticscholar["embedding"]["vector"]:
             paper_data["note"]  = "related:\n- "+"\n- ".join(rrs.search_in_pinecone_semanticscholar(paper_data["title"], semanticscholar["embedding"]["vector"], 5))
-            paper_data["tldr"] = semanticscholar["tldr"]["text"] if "tldr" in semanticscholar else ""
-            print("got an embedding for "+paper_data["url"])
+            try: paper_data["tldr"] = semanticscholar["tldr"]["text"]
+            except: pass
+            # print("got an embedding for "+paper_data["url"])
     except Exception as e:
         raise e
         print("error getting embedding for "+paper.url, e)
@@ -723,7 +725,7 @@ def create_harvest_email_paper(paper, service, **kwargs):
     if is_high_reputation(paper.url):
         notify_email(paper, service)
     else: 
-        print("no reputation for "+paper.url)   
+        print("no reputation for "+paper.url+" not sending notification")   
 
     record_paper_as_seen(paper)
 
@@ -743,7 +745,7 @@ def is_high_reputation(url):
     if "ieeexplore.ieee.org" in url: return True
     if "dl.acm.org" in url: return True
     if "link.springer.com" in url: return True
-    if "onlinelibrary.wiley.com" in url: return True
+    if "onlinelibrary.wiley.com" in url: return True # metadata via zotero, via crossref
     if "sciencedirect.com" in url: return True
     if "linkinghub.elsevier.com" in url: return True
     if "diva-portal.org" in url: return True
@@ -751,15 +753,6 @@ def is_high_reputation(url):
     if "ojs.aaai.org" in url: return True
     return False
 
-def get_doi_target(doi):
-    # https://doi.org/api/handles/10.1145/3597503.3623337
-    url = f"https://doi.org/api/handles/{doi}"
-    data = requests.get(url).json()
-    if data["responseCode"] == 1:
-        for i in data["values"]:
-            if i["type"] == "URL":
-                return i["data"]["value"]
-    raise Exception("doi not found")
 
 def collect_paper_data_from_doi(doi):
     assert len(doi)>0
@@ -793,7 +786,14 @@ def info_from_crossref(doi):
         dict: The transformed data in the FORMAT structure
     """
 
-    crossref_data = requests.get(f"https://api.crossref.org/works/{doi}").json()
+    try:
+        response = requests.get(f"https://api.crossref.org/works/{doi}")
+        if response.status_code != 200:
+            # print("Error fetching data from CrossRef for DOI: " + doi)
+            return None
+        crossref_data = response.json()
+    except:
+        raise Exception("Error fetching data from CrossRef for DOI: " + doi)
     # print(json.dumps(crossref_data, indent=2))
     message = crossref_data.get("message", {})
     
@@ -954,7 +954,8 @@ def collect_paper_data_from_url(url):
     if "dl.acm.org" in url:
         components = [x for x in url.split("/") if len(x)>0]
         doi = components[-2]+"/"+components[-1]
-        return info_from_crossref(doi)
+        crossref_data = info_from_crossref(doi)
+        if crossref_data: return crossref_data
         # no api for acm
         # see https://stackoverflow.com/questions/33380715/acm-digital-library-access-with-r-no-api-so-how-possible
         # alternative 1: go through crossref
@@ -1072,7 +1073,7 @@ def collect_paper_data_from_url(url):
                 if "doi" in ieeedata["articles"][0]:
                     doi = ieeedata["articles"][0]["doi"]
                 venue_title = ieeedata["articles"][0]["publication_title"]
-                abstract = ieeedata["articles"][0]["abstract"]
+                abstract = ieeedata["articles"][0]["abstract"] if "abstract" in  ieeedata["articles"][0] else ""
                 # print ([x for x in ieeedata["articles"][0]["authors"]["authors"]])
                 # args the ["authors"]["authors"], bad data model
                 authors = ", ".join([x["full_name"] for x in ieeedata["articles"][0]["authors"]["authors"]])
@@ -1082,6 +1083,9 @@ def collect_paper_data_from_url(url):
 
     if "semanticscholar.org/" in url:
         return collect_paper_data_from_semanticscholar(url)
+
+    if "mdpi.com/" in url:
+        return collect_paper_data_from_mdpi(url)
 
     if title == None:
         # default from Zotero Translation Server
@@ -1101,10 +1105,97 @@ def collect_paper_data_from_url(url):
         "note" : note
     }
 
+def collect_paper_data_from_mdpi(url):
+    """
+    Extract paper metadata from MDPI URLs.
+    
+    Args:
+        url (str): URL of the MDPI paper
+    
+    Returns:
+        dict: Paper metadata including title, authors, abstract, etc.
+    """
+    title = None
+    authors = ""
+    semanticscholarid = ""
+    tldr = ""
+    venue_title = None
+    doi = None
+    abstract = None
+    note = None
+    
+    # Extract DOI from URL if possible
+    # MDPI URLs are typically like https://www.mdpi.com/2076-3417/10/4/1342
+    # or https://www.mdpi.com/journal/sensors/2000000
+    # First try to get data via DOI if we can extract it
+    path_parts = [p for p in url.split('/') if p]
+    if len(path_parts) >= 3 and path_parts[-2].isdigit() and path_parts[-1].isdigit():
+        identifier = "/".join(path_parts[2:])
+        oai_url = f"http://oai.mdpi.com/oai/oai2.php?verb=GetRecord&metadataPrefix=oai_dc&identifier=oai:mdpi.com:/{identifier}/"
+        try:
+            response = requests.get(oai_url, timeout=10)
+            if response.status_code == 200:
+                # Parse XML response
+                xml_root = etree.fromstring(response.content)
+                
+                # Extract metadata
+                dc_namespace = {'dc': 'http://purl.org/dc/elements/1.1/',
+                               'oai_dc': 'http://www.openarchives.org/OAI/2.0/oai_dc/',
+                               'oai': 'http://www.openarchives.org/OAI/2.0/'}
+                
+                # Extract metadata elements
+                metadata = xml_root.find('.//oai:record/oai:metadata/oai_dc:dc', dc_namespace)
+                if metadata is not None:
+                    title = metadata.find('dc:title', dc_namespace)
+                    title = title.text if title is not None else None
+                    
+                    abstract = metadata.find('dc:description', dc_namespace)
+                    abstract = abstract.text if abstract is not None else None
+                    
+                    # Get all authors
+                    author_elements = metadata.findall('dc:creator', dc_namespace)
+                    authors = ", ".join([author.text for author in author_elements]) if author_elements else ""
+                    
+                    # Get DOI
+                    identifiers = metadata.findall('dc:identifier', dc_namespace)
+                    for identifier in identifiers:
+                        if identifier.text and "doi" in identifier.text:
+                            doi = identifier.text.replace('doi:', '').replace('https://dx.doi.org/', '')
+                            break
+                    
+                    # Get publication info
+                    source = metadata.find('dc:source', dc_namespace)
+                    if source is not None and source.text:
+                        venue_title = source.text
+                        
+                    # Some MDPI journals include the journal name in a specific format
+                    if not venue_title:
+                        publisher = metadata.find('dc:publisher', dc_namespace)
+                        if publisher is not None and publisher.text and 'MDPI' in publisher.text:
+                            venue_title = publisher.text
+        except Exception as e:
+            print(f"Error extracting MDPI metadata: {e}")
+
+
+    return {
+        "url": url,
+        "title": title,
+        "semanticscholarid": semanticscholarid,
+        "abstract": abstract,
+        "tldr": tldr,
+        "authors": authors,
+        "venue_title": venue_title,
+        "doi": doi,
+        "note": note
+    }
+    
+
+
 def collect_paper_data_from_semanticscholar(url):
     title = None
     semanticscholarid = url.split("?")[0].split("/")[-1]
-    semanticscholar = requests.get("https://api.semanticscholar.org/graph/v1/paper/"+semanticscholarid+"?fields=title,tldr,authors,externalIds,embedding,embedding.specter_v2", headers = {"x-api-key": config.semanticscholar_key}).json()        
+    semanticscholar = get_paper_info_from_semantic_scholar_id(semanticscholarid)
+    # semanticscholar = requests.get("https://api.semanticscholar.org/graph/v1/paper/"+semanticscholarid+"?fields=title,venue,tldr,authors,externalIds,embedding,embedding.specter_v2", headers = {"x-api-key": config.semanticscholar_key}).json()        
     tldr=semanticscholar["tldr"]["text"]+"\n\n" if "tldr" in semanticscholar and semanticscholar["tldr"] and semanticscholar["tldr"]["text"]  else ""
     if semanticscholar!=None and "authors" in semanticscholar:           
         authors = ", ".join([x["name"] for x in semanticscholar["authors"]])
@@ -1120,12 +1211,12 @@ def collect_paper_data_from_semanticscholar(url):
         "url": url,
         "title": title,
         "semanticscholarid": semanticscholarid,
-        "abstract": "",  # not available in the API
+        "abstract": "",  # not available in the SemanticScholar API
         "tldr": tldr,
         "authors": authors,
-        "venue_title" : "",  # not available in the API
-        "doi" : doi,  # not available in the API
-        "note" : ""  # not available in the API
+        "venue_title" : semanticscholar.get("venue",""), 
+        "doi" : doi,  
+        "note" : ""  
     }
 
 
@@ -1208,7 +1299,7 @@ def notify_email(paper, service):
     # create a new email
     # Label_4447645605958895953 is label for harvest.py
     # Create HTML email content
-    html_body = f"""<html>
+    email_html_body = f"""<html>
 <body>
 <p><strong>{paper.desc}</strong><br/>
 <a href="{paper.url}">{paper.url}</a></p>
@@ -1235,7 +1326,7 @@ def notify_email(paper, service):
     # msg.attach(text_part)
     
     # Add HTML version
-    html_part = MIMEText(html_body, 'html', 'utf-8')
+    html_part = MIMEText(email_html_body, 'html', 'utf-8')
     msg.attach(html_part)
     
     recorded = service.users().messages().insert(userId='me', body={
@@ -1264,27 +1355,37 @@ def notify_email(paper, service):
     #         'raw': base64.urlsafe_b64encode((header + email).replace('<martin.monperrus@gmail.com>','<monperrus@kth.se>,<xppcoder@gmail.com>,<benoit.baudry@umontreal.ca>').encode("utf-8")).decode("utf-8")
     #         }).execute()
     if paper.category.lower() == "LLM on code".lower():
-        # send the email
-        args = sendemail.EmailArgs()
-        args.sender_email = "harvest@monperrus.net"
-        args.sender_password = sendemail.login_keyring.get_password('login2', args.sender_email)
-        args.receiver_email = ""
-        # comma separated list, ** BCC ** 
-        args.bcc = "markus.borg@codescene.com"
-        args.subject = encoded_title
-        # args.message = invitation.serialize() # ics version
-        # print(dir(invitation))
-        args.message = email
-        # args.smtp_server = server # should be default
-        # arg.to = ""  
-        args.list = "harvest - "+paper.category
-        sendemail.send_email(args)
         
+        send_email("[harvest] new paper about "+paper.category, email_html_body,"markus.borg@codescene.com,postmaster@monperrus.net")
+        
+    if paper.category.lower() == "Testing".lower():
+        send_email("[harvest] new paper about "+paper.category, email_html_body,"deepika.tiwari@systemverification.com,benoit.baudry@umontreal.ca,postmaster@monperrus.net")
+
     # print(res)
 
     #print("unique_id", unique_id)
     print("emailed", paper.category)
 
+def send_email(encoded_title, email,recipients):
+    print("TODO implement daily summary email for Markus and Deepika")
+    return
+    print("sending",recipients,encoded_title)
+    # send the email
+    args = sendemail.EmailArgs()
+    args.sender_email = "harvest@monperrus.net"
+    args.sender_password = sendemail.login_keyring.get_password('login2', args.sender_email)
+    args.receiver_email = ""
+    # comma separated list, ** BCC ** 
+    args.bcc = recipients
+    args.subject = encoded_title
+    # args.message = invitation.serialize() # ics version
+    # print(dir(invitation))
+    args.message = email
+    # args.smtp_server = server # should be default
+    # arg.to = ""  
+    args.list = encoded_title
+    sendemail.send_email(args)
+    
 def get_labelId(category):
     if category=="planetse": return "Label_816000980291680327"
     return categories["readinglist - "+category]["labelId"]

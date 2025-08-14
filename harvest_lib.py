@@ -1,4 +1,5 @@
 import hashlib
+import requests
 
 def normalize_title(papertitle):
     # the single quote in a title is a caveat ’/'
@@ -20,3 +21,14 @@ def path_on_disk(paper):
     return path_on_disk_internal(paper.desc)
 def path_on_disk_internal(papertitle, prefix = "/home/martin/workspace/scholar-harvest/cache/harvest/"):
     return path_on_disk_internal_v2(papertitle, prefix)
+
+
+def get_doi_target(doi):
+    # https://doi.org/api/handles/10.1145/3597503.3623337
+    url = f"https://doi.org/api/handles/{doi}"
+    data = requests.get(url).json()
+    if data["responseCode"] == 1:
+        for i in data["values"]:
+            if i["type"] == "URL":
+                return i["data"]["value"]
+    raise Exception("doi not found")
