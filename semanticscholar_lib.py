@@ -207,6 +207,67 @@ def get_data_from_title(title):
     result = collect_paper_data_from_url_with_cache(real_url)
     return result
 
+def get_recommended_papers(paper_id, cache_dir="/home/martin/workspace/scholar-harvest/cache/recommendations/", verbose=False):
+    """
+    Get recommended papers for a given paper ID from Semantic Scholar API
+    
+    Args:
+        paper_id (str): The Semantic Scholar paper ID
+        cache_dir (str): Directory to store cached recommendations
+        verbose (bool): Whether to print verbose output
+        
+    Returns:
+        dict: API response containing recommended papers with title, url, and authors
+              or None if not found
+    """
+    if not paper_id or paper_id.strip() == '':
+        raise Exception("Error: Empty paper ID")
+        return None
+        
+    # Ensure cache directory exists
+    os.makedirs(cache_dir, exist_ok=True)
+    
+    # Check if we already have cached recommendations
+    cache_file = os.path.join(cache_dir, f"{paper_id}.json")
+    if os.path.exists(cache_file):
+        if verbose:
+            print(f"Loading cached recommendations for paper ID: {paper_id}")
+        with open(cache_file, "r") as f:
+            data = json.load(f)
+            data["cached"] = True
+            return data
+    
+    if verbose:
+        print(f"Fetching recommendations for paper ID: {paper_id}")
+        
+    url = f"https://api.semanticscholar.org/recommendations/v1/papers/forpaper/{paper_id}"
+    response = requests.get(url, headers={"x-api-key": config.semanticscholar_key})
+    
+    if response.status_code == 404:
+        if verbose:
+            print(f"No recommendations found for paper ID: {paper_id}")
+        return None
+        
+    response.raise_for_status()  # Raise an exception for bad status codes
+    data = response.json()
+    
+    # Add metadata
+    data["paper_id"] = paper_id
+    data["cached"] = False
+    data["fetched_at"] = time.time()
+    
+    # Save to cache
+    with open(cache_file, "w") as f:
+        json.dump(data, f, indent=2)
+        
+    if verbose:
+        print(f"Found {len(data.get('recommendedPapers', []))} recommendations")
+        
+    # Respect rate limits
+    time.sleep(1.0)
+    
+    return data
+    
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python get_semantic_scholar.py <title>")

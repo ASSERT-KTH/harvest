@@ -675,6 +675,9 @@ def get_cdsl_doi(csdlid):
 
 
 def create_harvest_email_paper(paper, service, **kwargs):
+    if "https://scholar.google" in paper.url:
+        # the paper will appear formally later
+        return False
     assert paper.url.startswith("http")
 
     origin = ""
@@ -688,6 +691,13 @@ def create_harvest_email_paper(paper, service, **kwargs):
     paper_data = collect_paper_data_from_url(paper.url)
     # is this does not work
     if paper_data["title"] == None or paper_data["title"] == "":
+        parsed_url = urlparse(paper.url)
+        domain = parsed_url.netloc
+        log_entry = {"domain": domain, "url": paper.url}
+        log_file_path = "cache/domains-no-api.support.jsonl"
+        os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
+        with open(log_file_path, "a") as f:
+            f.write(json.dumps(log_entry) + "\n")
         print("no API metadata available for "+paper.url)
         return False
 
@@ -695,8 +705,10 @@ def create_harvest_email_paper(paper, service, **kwargs):
         # getting the embedding  from semanticscholar_lib
         semanticscholar = get_embedding(paper_data["title"])
         paper_data["tldr"] = ""
+
+        # knn in embedding space (from semantic scholar)
         if semanticscholar and semanticscholar["embedding"] and semanticscholar["embedding"]["vector"]:
-            paper_data["note"]  = "related:\n- "+"\n- ".join(rrs.search_in_pinecone_semanticscholar(paper_data["title"], semanticscholar["embedding"]["vector"], 5))
+            paper_data["note"]  = "related in embedding space:\n- "+"\n- ".join(rrs.search_in_pinecone_semanticscholar(paper_data["title"], semanticscholar["embedding"]["vector"], 5))
             try: paper_data["tldr"] = semanticscholar["tldr"]["text"]
             except: pass
             # print("got an embedding for "+paper_data["url"])
@@ -898,7 +910,96 @@ def collect_paper_data_from_arxiv(url):
         "title": title,
         "note": note
     }
+
+def collect_paper_data_from_diva(url):
+    # exaple url = https://www.diva-portal.org/smash/get/diva2:1981288/FULLTEXT01.pdf
+    # urn: 
+    # https://www.monperrus.net/martin/diva-urn-json.py?urn=
+    # init
+    semanticscholarid=""
+    tldr=""
+    authors=""
+    venue_title = None
+    doi=None
+    abstract = None
+    title = None
+    note = None
+
+    # Extract diva id from URL
+    diva_id = None
+    parts = url.split('/')
+    for part in parts:
+        if 'diva2:' in part:
+            diva_id = part
+            break
     
+    if not diva_id:
+        return {
+            "url": url, "title": None, "semanticscholarid": "", "abstract": None,
+            "tldr": "", "authors": "", "venue_title": None, "doi": None, "note": None
+        }
+
+    # Call the DiVA API
+    api_url = f"https://www.monperrus.net/martin/diva-urn-json.py?urn={diva_id}"
+    try:
+        response = requests.get(api_url)
+        response.raise_for_status()
+        diva_data = response.json()
+    except (requests.RequestException, json.JSONDecodeError) as e:
+        print(f"Error fetching or parsing DiVA data for {diva_id}: {e}")
+        return {
+            "url": url, "title": None, "semanticscholarid": "", "abstract": None,
+            "tldr": "", "authors": "", "venue_title": None, "doi": None, "note": None
+        }
+
+    # Transform the data
+    mods = diva_data.get('mods', {})
+    
+    # Title
+    title = mods.get('titleInfo', {}).get('title')
+
+    # Authors
+    author_list = []
+    for person in mods.get('name', []):
+        if person.get('role', {}).get('roleTerm') == 'aut':
+            name_parts = person.get('namePart', [])
+            if len(name_parts) >= 2:
+                author_list.append(f"{name_parts[1]} {name_parts[0]}") # Given Family
+                venue_title = "Thesis at "+person.get('affiliation',"")
+    authors = ", ".join(author_list)
+
+    # Abstract
+    abstract_html = mods.get('abstract')
+    if abstract_html:
+        # Remove <p> tags
+        abstract = re.sub(r'</?p>', '', abstract_html)
+
+    # DOI
+    for identifier in mods.get('identifier', []):
+        if isinstance(identifier, str) and '.' in identifier and '/' in identifier:
+            # Simple heuristic to find a DOI-like string
+            doi = identifier
+            break
+
+    # Venue
+    for k in mods.get('relatedItem', []):
+        item = mods.get('relatedItem', [])[k]
+        if 'title' in item:
+            venue_title = item['title']
+            break # Take the first one
+
+    return {
+        "url": url,
+        "semanticscholarid": semanticscholarid,
+        "tldr": tldr,
+        "authors": authors,
+        "venue_title": venue_title,
+        "doi": doi,
+        "abstract": abstract,
+        "title": title,
+        "note": note
+    }
+
 def collect_paper_data_from_url(url):
     """
 
@@ -924,6 +1025,9 @@ def collect_paper_data_from_url(url):
         ## https://www.monperrus.net/martin/arxiv-json.py?id=2304.12015
         return collect_paper_data_from_arxiv(url)
 
+    if "diva-portal.org/" in url:    
+        ## https://www.monperrus.net/martin/arxiv-json.py?id=2304.12015
+        return collect_paper_data_from_diva(url)
     
     if "dblp.org/" in url:
         # https://dblp.org/rec/conf/icst/AlshammariAHB24.xml
@@ -1238,8 +1342,9 @@ def old_code_for_tldr():
         if semanticscholar!=None and "authors" in semanticscholar:           
             authors = ", ".join([x["name"] for x in semanticscholar["authors"]])
             
+        # knn in embedding space
         if semanticscholar!=None and "embedding" in semanticscholar and semanticscholar["embedding"] and "vector" in semanticscholar["embedding"]:           
-            note = "related:\n- "+"\n- ".join(rrs.search_in_pinecone_semanticscholar(title, semanticscholar["embedding"]["vector"], 5))
+            note = "related in embedding space:\n- "+"\n- ".join(rrs.search_in_pinecone_semanticscholar(title, semanticscholar["embedding"]["vector"], 5))
         #             # test of closest papers
         # closest = rrs.search_in_pinecone_str(paper.desc)
         # if len(closest) > 0:
