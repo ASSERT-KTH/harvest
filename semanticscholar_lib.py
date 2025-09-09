@@ -9,6 +9,8 @@ import time
 from harvest_lib import *
 # from harvest import *
 
+SEMANTICSCHOLAR_DELAY=1.0
+
 def get_semantic_scholar_tldr_embedding(semanticscholarid):
     
     semanticscholar = requests.get("https://api.semanticscholar.org/graph/v1/paper/"+semanticscholarid+"?fields=title,tldr,authors,embedding,embedding.specter_v2", headers = {"x-api-key": config.semanticscholar_key}).json()
@@ -138,13 +140,28 @@ def get_semantic_scholar_id_from_title(title):
     fname = path_on_disk_internal_v2(title, "/home/martin/workspace/scholar-harvest/cache/get_semantic_scholar_id_from_title/")
     if os.path.exists(fname):
         with open(fname, "r") as f:
-            return json.load(f)
+            try:
+                data = json.load(f)
+                return data
+            except:
+                os.remove(fname)
+                return get_semantic_scholar_id_from_title(title)
+        
+    # the service does not like column so removing them
+    #  
+    title = title.replace(":","")
+
     url = "https://api.semanticscholar.org/graph/v1/paper/search/match?query=" + title
+
     semanticscholar = requests.get(url, headers={"x-api-key": config.semanticscholar_key})
+    time.sleep(SEMANTICSCHOLAR_DELAY)
+    print(semanticscholar.text)
+    semanticscholar.raise_for_status()
     orig_data = semanticscholar.json()
     if "data" in orig_data:
         # simplifying the happy path
         data = orig_data["data"][0]
+    else: raise Exception("not found in SemanticScholar")
     with open(fname, "w") as f:
         json.dump(data, f)
     return data
@@ -153,7 +170,8 @@ def get_paper_info_from_semantic_scholar_id(semanticscholarid):
     fname = f"/home/martin/workspace/scholar-harvest/cache/get_paper_info_from_semantic_scholar_id/{semanticscholarid}"
     if os.path.exists(fname):
         with open(fname, "r") as f:
-            return json.load(f)
+            data = json.load(f)
+            return data
     # "Details about a paper "
     # documentation https://api.semanticscholar.org/api-docs/#tag/Paper-Data/operation/get_graph_get_paper
     #  If the fields parameter is omitted, only the paperId and title will be returned.
@@ -185,7 +203,6 @@ def get_url_from_title(title):
     if normalize_title(result["title"]) == normalize_title(title):
         # print("Title matches: " + result["data"][0]["title"])
         data = get_paper_info_from_semantic_scholar_id(result["paperId"])
-        print(data)
         if "externalIds" in data:
             if "DOI" in data["externalIds"]:
                 # print("DOI: " + data["externalIds"]["DOI"])
@@ -200,7 +217,7 @@ def get_url_from_title(title):
             raise Exception("No DOI or ArXiv found for title: " + str(data["externalIds"]))
         # some cases with no DOI
         else: return f"https://www.semanticscholar.org/paper/"+result["data"][0]["paperId"]
-    raise SemanticScholarNotFound("Title not found: " + title)        
+    raise SemanticScholarNotFound("Title does not match: " + title +" "+normalize_title(result["title"]) +" "+ normalize_title(title))        
 
 def get_data_from_title(title):
     real_url = get_url_from_title(title)
@@ -264,7 +281,7 @@ def get_recommended_papers(paper_id, cache_dir="/home/martin/workspace/scholar-h
         print(f"Found {len(data.get('recommendedPapers', []))} recommendations")
         
     # Respect rate limits
-    time.sleep(1.0)
+    time.sleep(SEMANTICSCHOLAR_DELAY)
     
     return data
     
