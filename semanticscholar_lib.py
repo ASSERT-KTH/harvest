@@ -60,8 +60,9 @@ def get_embedding(title, output_dir='/home/martin/workspace/scholar-harvest/cach
         if verbose:
             print(f"Loading cached embedding for: {title}")
         data = json.load(open(target_path))
-        data["cached"] = True
-        return data
+        if data["embedding"]:
+            data["cached"] = True
+            return data
 
     # Check if this title is in the 404 cache
     not_found_dir = "cache/404/"

@@ -179,24 +179,17 @@ CLASSIFICATION_DATA = {
                  'AI code',
                  'models of source code',
                  'python-state-changes', # dataset
-                 'translat'],
- 'Code analysis': [ 'spoon',
-                    'dataset',
-                    'benchmark',
-                    'merge',
-                    'differencing', 'compil', 'analysis', 'fuzz', 'transform'],
- 'Testing': ['test', 'oracle', 'metamorphic', 'mutant'],
- 'Reliability': ['fault','robustness', 'multi-variant', 'divers', 'chaos', 'n-version', 'antifrag', 'heal','observability'], 
- 'LLM general': ['language model', 
+                 'translat',
+                 'language model', 
                  'pre-training', 
                  'toolformer',
                  'jigsaw',
                  'langchain',
                  'talm'],
- 'Fake': ['fake', 'decoy', 'honeypot'],
- 'Curiosity': ['password'],
- 'WebAssembly': ['webassembly','wasm'],
-}
+ 'Testing': ['test', 'oracle', 'metamorphic', 'mutant'],
+ 'Reliability': ['fault','robustness', 'multi-variant', 'divers', 'chaos', 'n-version', 'antifrag', 'heal','observability'], 
+ 'Fake': ['fake', 'decoy', 'honeypot']
+ }
 
 
 categories = {}
@@ -708,7 +701,7 @@ def create_harvest_email_paper(paper, service, **kwargs):
 
         # knn in embedding space (from semantic scholar)
         if semanticscholar and semanticscholar["embedding"] and semanticscholar["embedding"]["vector"]:
-            paper_data["note"]  = "related in embedding space:\n- "+"\n- ".join(rrs.search_in_pinecone_semanticscholar(paper_data["title"], semanticscholar["embedding"]["vector"], 5))
+            paper_data["note"]  = "related in embedding space:\n- "+"\n- ".join([x[1] for x in rrs.search_in_pinecone_semanticscholar(paper_data["title"], semanticscholar["embedding"]["vector"], 5)])
             try: paper_data["tldr"] = semanticscholar["tldr"]["text"]
             except: pass
             # print("got an embedding for "+paper_data["url"])
@@ -952,11 +945,15 @@ def collect_paper_data_from_diva(url):
             "tldr": "", "authors": "", "venue_title": None, "doi": None, "note": None
         }
 
+    # print(diva_data)
     # Transform the data
     mods = diva_data.get('mods', {})
     
     # Title
-    title = mods.get('titleInfo', {}).get('title')
+    title = "failure to parse title"
+    try:
+        title = mods.get('titleInfo', {}).get(O).get('title')
+    except: pass
 
     # Authors
     author_list = []
@@ -969,7 +966,11 @@ def collect_paper_data_from_diva(url):
     authors = ", ".join(author_list)
 
     # Abstract
-    abstract_html = mods.get('abstract')
+    abstract_html = None
+    try:
+        abstract_html = mods.get('abstract')[0]
+    except: pass
+
     if abstract_html:
         # Remove <p> tags
         abstract = re.sub(r'</?p>', '', abstract_html)

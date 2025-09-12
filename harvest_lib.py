@@ -6,7 +6,7 @@ def normalize_title(papertitle):
     # the comma in a title is a caveat
     # special space  
     return papertitle.lower().strip().rstrip(".").replace(","," ").replace("   "," ").replace("  "," ").replace("’","'").replace("{","").replace("}","").replace(' ',' ')
-def path_on_disk_internal_v2(papertitle, prefix=""):
+def path_on_disk_internal_v2(papertitle, prefix="/home/martin/workspace/scholar-harvest/cache/harvest/"):
     # assert prefix.endswith("/")
     """ returns the local file name corresponding to a paper LOWER CASE BETTER THAN V1"""
     # remove trailing space and trailing dots from paper.desc
