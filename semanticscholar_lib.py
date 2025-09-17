@@ -99,6 +99,7 @@ def get_embedding(title, output_dir='/home/martin/workspace/scholar-harvest/cach
             not_found_path = path_on_disk_internal(title, not_found_dir)
             with open(not_found_path, "w") as f:
                 f.write(json.dumps({
+                    "url": url,
                     "title": title,
                     "response": semanticscholar.text
                 }, indent=2))
@@ -110,8 +111,18 @@ def get_embedding(title, output_dir='/home/martin/workspace/scholar-harvest/cach
         url = f"https://api.semanticscholar.org/graph/v1/paper/{semanticscholarid}?fields=title,tldr,citationCount,embedding,embedding.specter_v2"
         resp = requests.get(url, headers={"x-api-key": config.semanticscholar_key})
         semanticscholarfull = resp.json()
+
+        if "embedding" not in semanticscholarfull or not semanticscholarfull["embedding"] or "vector" not in semanticscholarfull["embedding"]:
+            not_found_path = path_on_disk_internal(title, not_found_dir)
+            with open(not_found_path, "w") as f:
+                f.write(json.dumps({
+                    "url": url,
+                    "title": title,
+                    "response": resp.text
+                }, indent=2))
+
         # Respect rate limits
-        print("grace delay for semanticscholar")
+        print("grace delay for semanticscholar embedding call for ", title, file=sys.stderr)
         time.sleep(delay)
         
         # Add the URL for reference

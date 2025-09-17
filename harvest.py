@@ -161,6 +161,7 @@ CLASSIFICATION_DATA = {
                  'generative',
                  'transformer',
                  'prompt',
+                 'embedding',
                  'representation',
                  'fine-tun',
                  'summar',
@@ -668,6 +669,7 @@ def get_cdsl_doi(csdlid):
 
 
 def create_harvest_email_paper(paper, service, **kwargs):
+    origin_url = paper.url
     if "https://scholar.google" in paper.url:
         # the paper will appear formally later
         return False
@@ -730,7 +732,7 @@ def create_harvest_email_paper(paper, service, **kwargs):
     if is_high_reputation(paper.url):
         notify_email(paper, service)
     else: 
-        print("no reputation for "+paper.url+" not sending notification")   
+        print("no reputation for "+origin_url+" not sending notification")   
 
     record_paper_as_seen(paper)
 
@@ -1700,8 +1702,49 @@ def get_creds():
     store = file.Storage(os.path.dirname(__file__)+'/token.json')
     creds = store.get()
     if not creds or creds.invalid:
+        """
+        The **`credentials.json`** file for the Gmail API is not something you can just "write" by hand — it must be downloaded directly from your Google Cloud project after you configure OAuth credentials.
+
+Now using the one from project "assert-experiments"
+        
+1. **Go to Google Cloud Console**
+   [https://console.cloud.google.com/](https://console.cloud.google.com/)
+
+2. **Create a new project (or select an existing one)**
+
+   * Click the project dropdown → **New Project**.
+   * Give it a name (e.g., *Gmail API Project*).
+
+3. **Enable the Gmail API**
+
+   * Go to **APIs & Services → Library**.
+   * Search for **Gmail API**.
+   * Click **Enable**.
+
+4. **Create OAuth 2.0 credentials**
+
+   * Navigate to **APIs & Services → Credentials**.
+   * Click **Create Credentials → OAuth client ID**.
+   * Configure the **OAuth consent screen** if prompted (add scopes, user info).
+   * Choose **Application type**:
+
+     * *Desktop app* (for scripts or testing)
+     * *Web application* (if building a web app)
+   * Click **Create**.
+
+5. **Download the `credentials.json` file**
+
+   * Once created, click the **Download JSON** button.
+   * Rename it to `credentials.json` and place it in your project folder.
+
+
+        
+        
+        """
         # get token for gmail read and write
-        flow = client.flow_from_clientsecrets(os.path.dirname(__file__)+'/credentials.json', SCOPES)
+        path= os.path.dirname(__file__)+'/credentials.json'
+        # path = "/home/martin/harvest-credentials.json"
+        flow = client.flow_from_clientsecrets(path, SCOPES)
         creds = tools.run_flow(flow, store)
         store.put(creds)
     return creds
@@ -1781,6 +1824,9 @@ def classify_planetse():
         # X-RSS-URL is added by r2e, nice
         url = [h['value'] for h in payload['headers'] if h['name']=='X-RSS-URL'][0]
         
+        # get the embedding
+        get_embedding(subj)
+
         # avoid duplicate
         paper = Paper(url, subj)
         #if already_seen(paper): continue
