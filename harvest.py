@@ -467,8 +467,12 @@ def transform_zotero_to_output(zotero_input):
     tldr = abstract + "\n\n"  # In this example, we're just using the abstract as the TLDR
     
     # Construct the output dictionary
+    url = item.get('url', '')
+    if 'archiveID' in item and len(item.get('archiveID', '').split(':'))>=2:
+        arxiv_id=item.get('archiveID', '').split(':')[1]
+        url = f"https://arxiv.org/abs/{arxiv_id}"
     output = {
-        'url': f"https://arxiv.org/abs/{item.get('archiveID', '').split(':')[1]}" if 'archiveID' in item else item.get('url', ''),
+        'url': url,
         'title': item.get('title', ''),
         'semanticscholarid': '0092ce9c83a4c033fa69a6225f8a542566915006',  # This seems to be a fixed value in the example
         'abstract': f"  {abstract}" if abstract else '',
@@ -766,19 +770,21 @@ def collect_paper_data_from_doi(doi):
     return collect_paper_data_from_url(get_doi_target(doi))
 
 def collect_paper_data_from_url_with_cache(url):
-    urlseen, thepath = already_seen_url(url,"/home/martin/workspace/scholar-harvest/cache/collect_paper_data_from_url_with_cache/")
+    urlseen, thepath = already_seen_url(url,"/home/martin/workspace/scholar-harvest/cache/harvest/")
     if urlseen:
+        # print(thepath)
         with open(thepath, "r") as f:
             data = json.load(f)
-            if "url" in data and data["url"] == url:
+            if "url" in data:
                 return data
             else:
                 # remove the file, it is not consistent
                 print("inconsistent data in cache, removing", thepath)
                 os.remove(thepath)
     data = collect_paper_data_from_url(url)
-    with open(thepath, "w") as f:
-        f.write(json.dumps(data))
+    if data:
+        with open(thepath, "w") as f:
+            f.write(json.dumps(data))
     return data
 
 def info_from_crossref(doi):
@@ -887,7 +893,8 @@ def collect_paper_data_from_arxiv(url):
     arxiv_id = components[-1].split("?")[0]
     # https://www.monperrus.net/martin/arxiv-json.py?id=2409.18952v1
     theurl = "https://www.monperrus.net/martin/arxiv-json.py?id="+arxiv_id
-    #print(theurl)
+    
+    # print(theurl, requests.get(theurl).text)
     arxiv_metadata = requests.get(theurl).json()
     abstract = arxiv_metadata["summary"].replace("\n"," ")
     authors = ", ".join([x["name"] for x in arxiv_metadata["author"]])
@@ -1109,6 +1116,8 @@ def collect_paper_data_from_url(url):
     if "computer.org" in url:
         csdlid = [x for x in url.split("/") if len(x)>0][-1]
         cdsl_data = get_cdsl_data(csdlid)
+        if "error" in cdsl_data:
+            return None
         doi = cdsl_data["doi"]
         abstract = cdsl_data["abstract"]
         title = cdsl_data["title"]
@@ -1299,6 +1308,10 @@ def collect_paper_data_from_mdpi(url):
 
 
 def collect_paper_data_from_semanticscholar(url):
+    """
+    Example URL: https://www.semanticscholar.org/paper/00023588eb75959bfbd6ab6b1c266cf007f400d1
+    
+    """
     title = None
     semanticscholarid = url.split("?")[0].split("/")[-1]
     semanticscholar = get_paper_info_from_semantic_scholar_id(semanticscholarid)

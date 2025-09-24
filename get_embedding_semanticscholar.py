@@ -123,7 +123,9 @@ def process_cache(output_dir, delay=1.0, format_type='json', verbose=False):
     for x in glob.glob("cache/harvest/*json"):
         with open(x, 'r') as f:
             data = json.load(f)
-        if data["title"]:
+            if "title" not in data:
+                os.remove(x)
+        if "title" in data and data["title"]:
             result = get_embedding(data["title"], output_dir, verbose, delay)
             if result and verbose:
                 print(data["title"],result["cached"])

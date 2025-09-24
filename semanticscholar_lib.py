@@ -60,7 +60,10 @@ def get_embedding(title, output_dir='/home/martin/workspace/scholar-harvest/cach
         if verbose:
             print(f"Loading cached embedding for: {title}")
         data = json.load(open(target_path))
-        if data["embedding"]:
+        if not data:
+            os.remove(target_path)
+            return get_embedding(title, output_dir, verbose, delay)
+        if data and data["embedding"]:
             data["cached"] = True
             return data
 
@@ -179,6 +182,10 @@ def get_semantic_scholar_id_from_title(title):
     return data
 
 def get_paper_info_from_semantic_scholar_id(semanticscholarid):
+    """
+    Low level function used by collect_paper_data_from_semanticscholar
+    
+    """
     fname = f"/home/martin/workspace/scholar-harvest/cache/get_paper_info_from_semantic_scholar_id/{semanticscholarid}"
     if os.path.exists(fname):
         with open(fname, "r") as f:
