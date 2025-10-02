@@ -35,6 +35,6 @@ def get_doi_target(doi):
                 return i["data"]["value"]
     raise Exception("doi not found")
 
-def get_paper_data(title):
+def get_cached_paper_data(title):
     path = path_on_disk_internal_v2(title,prefix="/home/martin/workspace/scholar-harvest/cache/harvest/")
     return json.load(open(path))

@@ -34,6 +34,7 @@ import sys
 from urllib.parse import urlparse
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+import random
 
 
 from harvest_lib import *
@@ -488,13 +489,13 @@ def transform_zotero_to_output(zotero_input):
 
 def get_cdsl_data(csdlid):
     """ get the data based on computer.org 
-can be used as follows
-    
-import harvest
-harvest.get_cdsl_doi("20lm4WmcwrS")
+    can be used as follows
+        
+    import harvest
+    harvest.get_cdsl_doi("20lm4WmcwrS")
 
-remember that DOI redirects to IEEE Xplore
-"""
+    remember that DOI redirects to IEEE Xplore
+    """
     csdlurl = 'https://www.computer.org/csdl/api/v1/graphql'
     headers = {
         'Content-Type': 'application/json',
@@ -698,16 +699,18 @@ def create_harvest_email_paper(paper, service, **kwargs):
         with open(log_file_path, "a") as f:
             f.write(json.dumps(log_entry) + "\n")
         print("no API metadata available for "+paper.url)
+        # we return so we don't mark as seen
+        # and we'll see it again later
         return False
 
     try:
         # getting the embedding  from semanticscholar_lib
-        semanticscholar = get_embedding(paper_data["title"])
+        semanticscholar = get_embedding_and_push_to_db(paper_data["title"])
         paper_data["tldr"] = ""
 
         # knn in embedding space (from semantic scholar)
         if semanticscholar and semanticscholar["embedding"] and semanticscholar["embedding"]["vector"]:
-            paper_data["note"]  = "related in embedding space:\n- "+"\n- ".join([x[1] for x in rrs.search_in_pinecone_semanticscholar(paper_data["title"], semanticscholar["embedding"]["vector"], 5)])
+            paper_data["note"]  = "related in embedding space:\n- "+"\n- ".join([x["title"] for x in rrs.search_in_pinecone_semanticscholar(paper_data["title"], semanticscholar["embedding"]["vector"], 5)])
             try: paper_data["tldr"] = semanticscholar["tldr"]["text"]
             except: pass
             # print("got an embedding for "+paper_data["url"])
@@ -785,7 +788,24 @@ def collect_paper_data_from_url_with_cache(url):
     if data:
         with open(thepath, "w") as f:
             f.write(json.dumps(data))
+            if len(data["title"])==0:
+                print("error, no title for ", url)
+                os.remove(thepath)
+                return collect_paper_data_from_url_with_cache(url)
+            assert len(data["title"])>0
+        _,titlepath = already_seen_url(data["title"],"/home/martin/workspace/scholar-harvest/cache/harvest/")
+        # print("linking", thepath, "to", titlepath)  
+        if os.path.exists(titlepath):
+           os.remove(titlepath)
+        os.link(thepath, titlepath)
     return data
+
+def get_paper_data_semanticscholar(title):
+    id = get_semantic_scholar_id_from_title(title)
+    id = id["paperId"]
+    paper_data = collect_paper_data_from_url_with_cache("https://www.semanticscholar.org/paper/"+id)
+    return paper_data
+
 
 def info_from_crossref(doi):
 
@@ -876,42 +896,46 @@ def info_from_crossref(doi):
     return formatted_output
 
 def collect_paper_data_from_arxiv(url):
-    # init
-    semanticscholarid=""
-    tldr=""
-    authors=""
-    venue_title = None
-    doi=None
-    abstract = None
-    title = None
-    note = None
+    try:
+        # init
+        semanticscholarid=""
+        tldr=""
+        authors=""
+        venue_title = None
+        doi=None
+        abstract = None
+        title = None
+        note = None
 
-    # data
-    ## https://www.monperrus.net/martin/arxiv-json.py?id=2304.12015
-    semanticscholarid="url:"+url.replace("/html/","/pdf/")
-    components = [x for x in url.split("/") if len(x)>0]
-    arxiv_id = components[-1].split("?")[0]
-    # https://www.monperrus.net/martin/arxiv-json.py?id=2409.18952v1
-    theurl = "https://www.monperrus.net/martin/arxiv-json.py?id="+arxiv_id
-    
-    # print(theurl, requests.get(theurl).text)
-    arxiv_metadata = requests.get(theurl).json()
-    abstract = arxiv_metadata["summary"].replace("\n"," ")
-    authors = ", ".join([x["name"] for x in arxiv_metadata["author"]])
-    venue_title = arxiv_metadata["journal_ref"]
-    title = arxiv_metadata["title"]
+        # data
+        ## https://www.monperrus.net/martin/arxiv-json.py?id=2304.12015
+        semanticscholarid="url:"+url.replace("/html/","/pdf/")
+        components = [x for x in url.split("/") if len(x)>0]
+        arxiv_id = components[-1].split("?")[0]
+        # https://www.monperrus.net/martin/arxiv-json.py?id=2409.18952v1
+        theurl = "https://www.monperrus.net/martin/arxiv-json.py?id="+arxiv_id
+        
+        # print(theurl, requests.get(theurl).text)
+        arxiv_metadata = requests.get(theurl).json()
+        abstract = arxiv_metadata["summary"].replace("\n"," ")
+        authors = ", ".join([x["name"] for x in arxiv_metadata["author"]])
+        venue_title = arxiv_metadata["journal_ref"]
+        title = arxiv_metadata["title"]
 
-    return {
-        "url": url,
-        "semanticscholarid": semanticscholarid,
-        "tldr": tldr,
-        "authors": authors,
-        "venue_title": venue_title,
-        "doi": doi,
-        "abstract": abstract,
-        "title": title,
-        "note": note
-    }
+        return {
+            "url": url,
+            "semanticscholarid": semanticscholarid,
+            "tldr": tldr,
+            "authors": authors,
+            "venue_title": venue_title,
+            "doi": doi,
+            "abstract": abstract,
+            "title": title,
+            "note": note
+        }
+    except Exception as e:
+        print("error fetching arxiv metadata for "+url, e)
+        return None
 
 def collect_paper_data_from_diva(url):
     # exaple url = https://www.diva-portal.org/smash/get/diva2:1981288/FULLTEXT01.pdf
@@ -956,7 +980,10 @@ def collect_paper_data_from_diva(url):
 
     # print(diva_data)
     # Transform the data
-    mods = diva_data.get('mods', {})
+    mods = diva_data.get('mods', [{}])
+    # argh, the API is not consistent
+    if isinstance(mods, list):
+        mods = mods[0]
     
     # Title
     title = "failure to parse title"
@@ -966,6 +993,7 @@ def collect_paper_data_from_diva(url):
 
     # Authors
     author_list = []
+    # print(mods)
     for person in mods.get('name', []):
         if person.get('role', {}).get('roleTerm') == 'aut':
             name_parts = person.get('namePart', [])
@@ -1317,6 +1345,7 @@ def collect_paper_data_from_semanticscholar(url):
     semanticscholar = get_paper_info_from_semantic_scholar_id(semanticscholarid)
     # semanticscholar = requests.get("https://api.semanticscholar.org/graph/v1/paper/"+semanticscholarid+"?fields=title,venue,tldr,authors,externalIds,embedding,embedding.specter_v2", headers = {"x-api-key": config.semanticscholar_key}).json()        
     tldr=semanticscholar["tldr"]["text"]+"\n\n" if "tldr" in semanticscholar and semanticscholar["tldr"] and semanticscholar["tldr"]["text"]  else ""
+    authors = ""
     if semanticscholar!=None and "authors" in semanticscholar:           
         authors = ", ".join([x["name"] for x in semanticscholar["authors"]])
     if semanticscholar!=None and "title" in semanticscholar:           
@@ -1360,7 +1389,7 @@ def old_code_for_tldr():
             
         # knn in embedding space
         if semanticscholar!=None and "embedding" in semanticscholar and semanticscholar["embedding"] and "vector" in semanticscholar["embedding"]:           
-            note = "related in embedding space:\n- "+"\n- ".join(rrs.search_in_pinecone_semanticscholar(title, semanticscholar["embedding"]["vector"], 5))
+            note = "related in embedding space:\n- "+"\n- ".join([x["title"] for x in rrs.search_in_pinecone_semanticscholar(title, semanticscholar["embedding"]["vector"], 6) if x["title"] != title])
         #             # test of closest papers
         # closest = rrs.search_in_pinecone_str(paper.desc)
         # if len(closest) > 0:
@@ -1408,7 +1437,7 @@ def notify_email(paper, service):
     if paper.reader_url and paper.reader_url != "":
         email += paper.reader_url+"\n"
 
-    email += "\n\ncategory: "+paper.category
+    email += "\n\ncategories: "+", ".join(paper.categories)+"\n"
     email += "\nreason: "+paper.print_reason()+"\n"
     
     if paper.origin and paper.origin != "":
@@ -1428,7 +1457,7 @@ def notify_email(paper, service):
 {f"<p><strong>TLDR:</strong> {paper.tldr}</p>" if paper.tldr else ""}
 {f"<p><strong>Abstract:</strong> {paper.abstract}</p>" if paper.abstract else ""}
 {f"<p><strong>Authors:</strong> {paper.authors}</p>" if paper.authors else ""}
-<p><strong>Category:</strong> {paper.category}</p>
+<p><strong>Category:</strong> {", ".join(paper.categories)}</p>
 <p><strong>Reason:</strong> {paper.print_reason()}</p>
 {f"<pre>{paper.note}</pre>" if paper.note else ""}
 {f"<!--<p><strong>Origin:</strong> {paper.origin}</p>-->" if paper.origin else ""}
@@ -1457,8 +1486,8 @@ def notify_email(paper, service):
     recorded = service.users().messages().get(userId='me', id=recorded["id"], format='metadata', metadataHeaders=['Message-Id']).execute()
 
 
-    # add one more labelId tags to message id
-    category_label_ids = [get_labelId(x) for x in paper.categories]
+    # add one single labelId tag to reduce reviewing time
+    category_label_ids = [get_labelId(random.choice(paper.categories))]
     if category_label_ids:
         service.users().messages().modify(
             userId='me', 

@@ -7,6 +7,7 @@ import json
 import config
 import time
 from harvest_lib import *
+import embed
 # from harvest import *
 
 SEMANTICSCHOLAR_DELAY=1.0
@@ -33,7 +34,14 @@ def get_semantic_scholar_tldr_embedding(semanticscholarid):
         "tldr": tldr if "tldr" in locals() else None,
         "embedding": embedding if "embedding" in locals() else None,
     }
-    
+
+def get_embedding_and_push_to_db(title, output_dir='/home/martin/workspace/scholar-harvest/cache/embedding.specter_v2/', verbose=False, delay=1.0):
+    result = get_embedding(title, output_dir, verbose, delay)
+    # print(result)
+    if result and "embedding" in result and result["embedding"] and "vector" in result["embedding"]:
+        embed.push_single_entry_to_pinecone("se-semanticscholar", result)
+    return result
+
 def get_embedding(title, output_dir='/home/martin/workspace/scholar-harvest/cache/embedding.specter_v2/', verbose=False, delay=1.0):
     """
     Get embedding for a paper title from SemanticScholar API
@@ -60,7 +68,7 @@ def get_embedding(title, output_dir='/home/martin/workspace/scholar-harvest/cach
         if verbose:
             print(f"Loading cached embedding for: {title}")
         data = json.load(open(target_path))
-        if not data:
+        if not data or not "embedding" in data or not data["embedding"] or "vector" not in data["embedding"]:
             os.remove(target_path)
             return get_embedding(title, output_dir, verbose, delay)
         if data and data["embedding"]:
@@ -170,7 +178,7 @@ def get_semantic_scholar_id_from_title(title):
 
     semanticscholar = requests.get(url, headers={"x-api-key": config.semanticscholar_key})
     time.sleep(SEMANTICSCHOLAR_DELAY)
-    print(semanticscholar.text)
+    # print(semanticscholar.text)
     semanticscholar.raise_for_status()
     orig_data = semanticscholar.json()
     if "data" in orig_data:
@@ -303,7 +311,69 @@ def get_recommended_papers(paper_id, cache_dir="/home/martin/workspace/scholar-h
     time.sleep(SEMANTICSCHOLAR_DELAY)
     
     return data
+
+
+def get_cited_papers(paper_id, cache_dir="/home/martin/workspace/scholar-harvest/cache/cited_papers/", verbose=False):
+    """
+    Get papers cited by a given paper ID from Semantic Scholar API
     
+    Args:
+        paper_id (str): The Semantic Scholar paper ID
+        cache_dir (str): Directory to store cached cited papers data
+        verbose (bool): Whether to print verbose output
+        
+    Returns:
+        dict: API response containing cited papers with offset, citingPaperInfo, and data array
+              or None if not found
+    """
+    if not paper_id or paper_id.strip() == '':
+        raise Exception("Error: Empty paper ID")
+        return None
+        
+    # Ensure cache directory exists
+    os.makedirs(cache_dir, exist_ok=True)
+    
+    # Check if we already have cached cited papers
+    cache_file = os.path.join(cache_dir, f"{paper_id}.json")
+    if os.path.exists(cache_file):
+        if verbose:
+            print(f"Loading cached cited papers for paper ID: {paper_id}")
+        with open(cache_file, "r") as f:
+            data = json.load(f)
+            # data["cached"] = True
+            return data
+    
+    if verbose:
+        print(f"Fetching cited papers for paper ID: {paper_id}")
+        
+    url = f"https://api.semanticscholar.org/graph/v1/paper/{paper_id}/references"
+    response = requests.get(url, headers={"x-api-key": config.semanticscholar_key})
+    
+    if response.status_code == 404:
+        if verbose:
+            print(f"No cited papers found for paper ID: {paper_id}")
+        return None
+        
+    response.raise_for_status()  # Raise an exception for bad status codes
+    data = response.json()
+    
+    data = data["data"]
+    data = [d for d in data if "citedPaper" in d and "paperId" in d["citedPaper"] and d["citedPaper"]["paperId"]]
+
+    # Save to cache
+    with open(cache_file, "w") as f:
+        json.dump(data, f, indent=2)
+        
+    if verbose:
+        cited_count = len(data.get('data', []))
+        print(f"Found {cited_count} cited papers")
+        
+    # Respect rate limits
+    time.sleep(SEMANTICSCHOLAR_DELAY)
+
+    return data
+
+
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python get_semantic_scholar.py <title>")
