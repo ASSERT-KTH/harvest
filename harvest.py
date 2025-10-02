@@ -778,6 +778,10 @@ def collect_paper_data_from_url_with_cache(url):
         # print(thepath)
         with open(thepath, "r") as f:
             data = json.load(f)
+            if not data or "title" not in data or not data["title"] or len(data["title"])==0:
+                print("error, no title for ", url)
+                os.remove(thepath)
+                return collect_paper_data_from_url_with_cache(url)
             if "url" in data:
                 return data
             else:
@@ -785,14 +789,10 @@ def collect_paper_data_from_url_with_cache(url):
                 print("inconsistent data in cache, removing", thepath)
                 os.remove(thepath)
     data = collect_paper_data_from_url(url)
+    assert len(data["title"])>0,(url,data)
     if data:
         with open(thepath, "w") as f:
             f.write(json.dumps(data))
-            if len(data["title"])==0:
-                print("error, no title for ", url)
-                os.remove(thepath)
-                return collect_paper_data_from_url_with_cache(url)
-            assert len(data["title"])>0
         _,titlepath = already_seen_url(data["title"],"/home/martin/workspace/scholar-harvest/cache/harvest/")
         # print("linking", thepath, "to", titlepath)  
         if os.path.exists(titlepath):
@@ -1008,9 +1008,6 @@ def collect_paper_data_from_diva(url):
         abstract_html = mods.get('abstract')[0]
     except: pass
 
-    if abstract_html:
-        # Remove <p> tags
-        abstract = re.sub(r'</?p>', '', abstract_html)
 
     # DOI
     for identifier in mods.get('identifier', []):
@@ -1033,7 +1030,7 @@ def collect_paper_data_from_diva(url):
         "authors": authors,
         "venue_title": venue_title,
         "doi": doi,
-        "abstract": abstract,
+        "abstract": abstract_html,
         "title": title,
         "note": note
     }

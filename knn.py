@@ -17,12 +17,15 @@ title = sys.argv[1]
 paper_id = semanticscholar_lib.get_semantic_scholar_id_from_title(title)
 
 
-
 # also push to pine cone
 get_embedding_semanticscholar.download_and_save(title)
 
 
 path = path_on_disk_internal_v2(title,prefix="cache/embedding.specter_v2/")
+if not os.path.exists(path):
+    print("embedding not yet computed at semanticscholar, try again later")
+    sys.exit(1)
+
 paper_data = json.load(open(path))
 
 if not paper_data or "vector" not in paper_data["embedding"]:
@@ -125,7 +128,7 @@ for x in rrs.search_in_pinecone_semanticscholar(title, vector):
             paper_data = None
 
         if not paper_data:
-            paper_data = collect_paper_data_from_url_with_cache("https://www.semanticscholar.org/paper/"+id)
+            paper_data = collect_paper_data_from_url_with_cache("https://www.semanticscholar.org/paper/"+id.replace("semanticscholar:",""))
 
         # print(paper_data)
         print(paper_data["venue_title"])
