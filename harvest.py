@@ -953,11 +953,14 @@ def collect_paper_data_from_diva(url):
 
     # Extract diva id from URL
     diva_id = None
-    parts = url.split('/')
-    for part in parts:
-        if 'diva2:' in part:
-            diva_id = part
-            break
+    if 'record.jsf?pid=' in url:
+        diva_id = url.split('record.jsf?pid=')[-1]
+    else:
+        parts = url.split('/')
+        for part in parts:
+            if 'diva2:' in part:
+                diva_id = part
+                break
     
     if not diva_id:
         return {
@@ -978,6 +981,9 @@ def collect_paper_data_from_diva(url):
             "tldr": "", "authors": "", "venue_title": None, "doi": None, "note": None
         }
 
+    if not diva_data or 'error' in diva_data:
+        print(api_url)
+        return None
     # print(diva_data)
     # Transform the data
     mods = diva_data.get('mods', [{}])
@@ -999,7 +1005,7 @@ def collect_paper_data_from_diva(url):
             name_parts = person.get('namePart', [])
             if len(name_parts) >= 2:
                 author_list.append(f"{name_parts[1]} {name_parts[0]}") # Given Family
-                venue_title = "Thesis at "+person.get('affiliation',"")
+                venue_title = "Thesis at "+str(person.get('affiliation',"")[0])
     authors = ", ".join(author_list)
 
     # Abstract
@@ -1035,6 +1041,414 @@ def collect_paper_data_from_diva(url):
         "note": note
     }
 
+def collect_paper_data_from_hal(url):
+    # example https://hal.science/hal-01956501/document
+    # Extract HAL ID from URL
+    hal_id = url.split("/")[3]
+
+    # Construct JSON API URL
+    json_url = f"https://hal.science/{hal_id}/json"
+
+    try:
+        response = requests.get(json_url, timeout=10)
+        """ example
+      "response": {
+            "numFound": 1,
+            "start": 0,
+            "maxScore": 5.9154453,
+            "numFoundExact": true,
+            "docs": [
+                  {
+                        "docid": "4204968",
+                        "label_s": "Martin Monperrus. The Living Review on Automated Program Repair. [Technical Report] hal-01956501, HAL Archives Ouvertes. 2018. &#x27E8;hal-01956501v6&#x27E9;",
+                        "citationRef_s": "[Technical Report] hal-01956501, HAL Archives Ouvertes. 2018",
+                        "citationFull_s": "Martin Monperrus. The Living Review on Automated Program Repair. [Technical Report] hal-01956501, HAL Archives Ouvertes. 2018. <a target=\"_blank\" href=\"https://hal.science/hal-01956501v6\">&#x27E8;hal-01956501v6&#x27E9;</a>",
+                        "label_bibtex": "@techreport{monperrus:hal-01956501,\n  TITLE = {{The Living Review on Automated Program Repair}},\n  AUTHOR = {Monperrus, Martin},\n  URL = {https://hal.science/hal-01956501},\n  TYPE = {Technical Report},\n  NUMBER = {hal-01956501},\n  INSTITUTION = {{HAL Archives Ouvertes}},\n  YEAR = {2018},\n  PDF = {https://hal.science/hal-01956501v6/file/repair-living-review.pdf},\n  HAL_ID = {hal-01956501},\n  HAL_VERSION = {v6},\n}\n",
+                        "label_endnote": "%0 Report\n%T The Living Review on Automated Program Repair\n%+ KTH Royal Institute of Technology [Stockholm] (KTH)\n%A Monperrus, Martin\n%N hal-01956501\n%I HAL Archives Ouvertes\n%8 2018\n%D 2018\n%Z Computer Science [cs]/Software Engineering [cs.SE]Reports\n%X Concept This paper is a living review on automatic program repair 1. Compared to a traditional survey, a living review evolves over time. I use a concise bullet-list style meant to be easily accessible by the greatest number of readers, in particular students and practitioners. Within a section, all papers are ordered in a reverse chronological order, so as to easily get the research timeline. The references are sorted chronologically and years are explicitly stated inline to easily grasp the most recent references. Inclusion criteria The inclusion criteria are that the considered papers 1) must be about automatic repair with some kind of patch generation (runtime repair without patch generation is excluded 2); 2) must contain a reasonable amount of material (at least 4 double-column pages); 3) are stored on an durable site (notable publisher, arXiv, Zenodo). There is no restriction about whether the paper has been formally peer-reviewed or not. Originality Compared to formal surveys [132, 125], this living review contains very recent references and continues to evolve. It uses a bullet-list concise style that is not typical academic writing. Notification To get notified with new versions, click here. Feedback Do not hesitate to report a mistake, a confusing statement or a missing paper,\n%G English\n%2 https://hal.science/hal-01956501v6/document\n%2 https://hal.science/hal-01956501v6/file/repair-living-review.pdf\n%L hal-01956501\n%U https://hal.science/hal-01956501\n%~ LARA\n",
+                        "label_coins": "<span class=\"Z3988\" title=\"ctx_ver=Z39.88-2004&amp;rft_val_fmt=info%3Aofi%2Ffmt%3Akev%3Amtx%3Adc&amp;rft.type=report&amp;rft.identifier=https%3A%2F%2Fhal.science%2Fhal-01956501&amp;rft.identifier=hal-01956501&amp;rft.title=The%20Living%20Review%20on%20Automated%20Program%20Repair&amp;rft.creator=Monperrus%2C%20Martin&amp;rft.language=en&amp;rft.date=2018\"></span>",
+                        "openAccess_bool": true,
+                        "domainAllCode_s": [
+                              "info.info-se"
+                        ],
+                        "level0_domain_s": [
+                              "info"
+                        ],
+                        "domain_s": [
+                              "0.info",
+                              "1.info.info-se"
+                        ],
+                        "level1_domain_s": [
+                              "info.info-se"
+                        ],
+                        "fr_domainAllCodeLabel_fs": [
+                              "info.info-se_FacetSep_Informatique [cs]/Génie logiciel [cs.SE]"
+                        ],
+                        "en_domainAllCodeLabel_fs": [
+                              "info.info-se_FacetSep_Computer Science [cs]/Software Engineering [cs.SE]"
+                        ],
+                        "es_domainAllCodeLabel_fs": [
+                              "info.info-se_FacetSep_Computer Science [cs]/Software Engineering [cs.SE]"
+                        ],
+                        "eu_domainAllCodeLabel_fs": [
+                              "info.info-se_FacetSep_domain_info/domain_info.info-se"
+                        ],
+                        "primaryDomain_s": "info.info-se",
+                        "en_title_s": [
+                              "The Living Review on Automated Program Repair"
+                        ],
+                        "title_s": [
+                              "The Living Review on Automated Program Repair"
+                        ],
+                        "abstract_s": [
+                              "Concept This paper is a living review on automatic program repair 1. Compared to a traditional survey, a living review evolves over time. I use a concise bullet-list style meant to be easily accessible by the greatest number of readers, in particular students and practitioners. Within a section, all papers are ordered in a reverse chronological order, so as to easily get the research timeline. The references are sorted chronologically and years are explicitly stated inline to easily grasp the most recent references. Inclusion criteria The inclusion criteria are that the considered papers 1) must be about automatic repair with some kind of patch generation (runtime repair without patch generation is excluded 2); 2) must contain a reasonable amount of material (at least 4 double-column pages); 3) are stored on an durable site (notable publisher, arXiv, Zenodo). There is no restriction about whether the paper has been formally peer-reviewed or not. Originality Compared to formal surveys [132, 125], this living review contains very recent references and continues to evolve. It uses a bullet-list concise style that is not typical academic writing. Notification To get notified with new versions, click here. Feedback Do not hesitate to report a mistake, a confusing statement or a missing paper,"
+                        ],
+                        "en_abstract_s": [
+                              "Concept This paper is a living review on automatic program repair 1. Compared to a traditional survey, a living review evolves over time. I use a concise bullet-list style meant to be easily accessible by the greatest number of readers, in particular students and practitioners. Within a section, all papers are ordered in a reverse chronological order, so as to easily get the research timeline. The references are sorted chronologically and years are explicitly stated inline to easily grasp the most recent references. Inclusion criteria The inclusion criteria are that the considered papers 1) must be about automatic repair with some kind of patch generation (runtime repair without patch generation is excluded 2); 2) must contain a reasonable amount of material (at least 4 double-column pages); 3) are stored on an durable site (notable publisher, arXiv, Zenodo). There is no restriction about whether the paper has been formally peer-reviewed or not. Originality Compared to formal surveys [132, 125], this living review contains very recent references and continues to evolve. It uses a bullet-list concise style that is not typical academic writing. Notification To get notified with new versions, click here. Feedback Do not hesitate to report a mistake, a confusing statement or a missing paper,"
+                        ],
+                        "authIdFormPerson_s": [
+                              "23400-537"
+                        ],
+                        "authIdForm_i": [
+                              23400
+                        ],
+                        "authIdPerson_i": [
+                              537
+                        ],
+                        "authLastName_s": [
+                              "Monperrus"
+                        ],
+                        "authFirstName_s": [
+                              "Martin"
+                        ],
+                        "authFullName_s": [
+                              "Martin Monperrus"
+                        ],
+                        "authLastNameFirstName_s": [
+                              "Monperrus Martin"
+                        ],
+                        "authIdLastNameFirstName_fs": [
+                              "537_FacetSep_Monperrus Martin"
+                        ],
+                        "authFullNameIdFormPerson_fs": [
+                              "Martin Monperrus_FacetSep_23400-537"
+                        ],
+                        "authAlphaLastNameFirstNameId_fs": [
+                              "M_AlphaSep_Monperrus Martin_FacetSep_537"
+                        ],
+                        "authIdFullName_fs": [
+                              "537_FacetSep_Martin Monperrus"
+                        ],
+                        "authFullNameId_fs": [
+                              "Martin Monperrus_FacetSep_537"
+                        ],
+                        "authQuality_s": [
+                              "aut"
+                        ],
+                        "authOrganismId_i": [
+                              92973
+                        ],
+                        "authStructId_i": [
+                              92973
+                        ],
+                        "authOrganism_s": [
+                              "Université de Lille, Sciences et Technologies"
+                        ],
+                        "authEmailDomain_s": [
+                              "csc.kth.se"
+                        ],
+                        "authIdHal_i": [
+                              537
+                        ],
+                        "authIdHal_s": [
+                              "martin-monperrus"
+                        ],
+                        "authORCIDIdExt_s": [
+                              "0000-0003-3505-3383"
+                        ],
+                        "authIDHALIdExt_s": [
+                              "martin-monperrus"
+                        ],
+                        "authIdRefIdExt_s": [
+                              "129846759"
+                        ],
+                        "authFullNameFormIDPersonIDIDHal_fs": [
+                              "Martin Monperrus_FacetSep_23400-537_FacetSep_martin-monperrus"
+                        ],
+                        "authFullNamePersonIDIDHal_fs": [
+                              "Martin Monperrus_FacetSep_537_FacetSep_martin-monperrus"
+                        ],
+                        "authIdHalFullName_fs": [
+                              "martin-monperrus_FacetSep_Martin Monperrus"
+                        ],
+                        "authFullNameIdHal_fs": [
+                              "Martin Monperrus_FacetSep_martin-monperrus"
+                        ],
+                        "authAlphaLastNameFirstNameIdHal_fs": [
+                              "M_AlphaSep_Monperrus Martin_FacetSep_martin-monperrus"
+                        ],
+                        "authLastNameFirstNameIdHalPersonid_fs": [
+                              "Monperrus Martin_FacetSep_martin-monperrus_FacetSep_537"
+                        ],
+                        "authIdHasPrimaryStructure_fs": [
+                              "23400-537_FacetSep_Martin Monperrus_JoinSep_366312_FacetSep_KTH Royal Institute of Technology [Stockholm]"
+                        ],
+                        "structPrimaryHasAuthId_fs": [
+                              "366312_FacetSep_KTH Royal Institute of Technology [Stockholm]_JoinSep_23400-537_FacetSep_Martin Monperrus"
+                        ],
+                        "structPrimaryHasAuthIdHal_fs": [
+                              "366312_FacetSep_KTH Royal Institute of Technology [Stockholm]_JoinSep_martin-monperrus_FacetSep_Monperrus Martin"
+                        ],
+                        "structPrimaryHasAlphaAuthId_fs": [
+                              "M_AlphaSep_366312_FacetSep_KTH Royal Institute of Technology [Stockholm]_JoinSep_23400-537_FacetSep_Monperrus Martin"
+                        ],
+                        "structPrimaryHasAlphaAuthIdHal_fs": [
+                              "M_AlphaSep_366312_FacetSep_KTH Royal Institute of Technology [Stockholm]_JoinSep_martin-monperrus_FacetSep_Monperrus Martin"
+                        ],
+                        "structPrimaryHasAlphaAuthIdHalPersonid_fs": [
+                              "M_AlphaSep_366312_FacetSep_KTH Royal Institute of Technology [Stockholm]_JoinSep_martin-monperrus_FacetSep_537_FacetSep_Monperrus Martin"
+                        ],
+                        "authIdHasStructure_fs": [
+                              "23400-537_FacetSep_Martin Monperrus_JoinSep_366312_FacetSep_KTH Royal Institute of Technology [Stockholm]"
+                        ],
+                        "structHasAuthId_fs": [
+                              "366312_FacetSep_KTH Royal Institute of Technology [Stockholm]_JoinSep_23400-537_FacetSep_Martin Monperrus"
+                        ],
+                        "structHasAuthIdHal_fs": [
+                              "366312_FacetSep_KTH Royal Institute of Technology [Stockholm]_JoinSep_martin-monperrus_FacetSep_Monperrus Martin"
+                        ],
+                        "structHasAuthIdHalPersonid_s": [
+                              "366312_FacetSep_KTH Royal Institute of Technology [Stockholm]_JoinSep_martin-monperrus_FacetSep_537_FacetSep_Monperrus Martin"
+                        ],
+                        "structHasAlphaAuthId_fs": [
+                              "M_AlphaSep_366312_FacetSep_KTH Royal Institute of Technology [Stockholm]_JoinSep_23400-537_FacetSep_Monperrus Martin"
+                        ],
+                        "structHasAlphaAuthIdHal_fs": [
+                              "M_AlphaSep_366312_FacetSep_KTH Royal Institute of Technology [Stockholm]_JoinSep_martin-monperrus_FacetSep_Monperrus Martin"
+                        ],
+                        "structHasAlphaAuthIdHalPersonid_fs": [
+                              "M_AlphaSep_366312_FacetSep_KTH Royal Institute of Technology [Stockholm]_JoinSep_martin-monperrus_FacetSep_537_FacetSep_Monperrus Martin"
+                        ],
+                        "instStructId_i": [
+                              366312
+                        ],
+                        "instStructIdName_fs": [
+                              "366312_FacetSep_KTH Royal Institute of Technology [Stockholm]"
+                        ],
+                        "instStructNameId_fs": [
+                              "K_AlphaSep_KTH Royal Institute of Technology [Stockholm]_FacetSep_366312"
+                        ],
+                        "instStructName_fs": [
+                              "K_AlphaSep_KTH Royal Institute of Technology [Stockholm]"
+                        ],
+                        "instStructAcronym_s": [
+                              "KTH"
+                        ],
+                        "instStructName_s": [
+                              "KTH Royal Institute of Technology [Stockholm]"
+                        ],
+                        "instStructAddress_s": [
+                              "SE-100 44, Stockholm, Sweden"
+                        ],
+                        "instStructCountry_s": [
+                              "se"
+                        ],
+                        "instStructType_s": [
+                              "institution"
+                        ],
+                        "instStructValid_s": [
+                              "VALID"
+                        ],
+                        "instStructRorIdExt_s": [
+                              "https://ror.org/026vcq606"
+                        ],
+                        "instStructRorIdExtUrl_s": [
+                              "https://ror.org/https://ror.org/026vcq606"
+                        ],
+                        "structId_i": [
+                              366312
+                        ],
+                        "structIdName_fs": [
+                              "366312_FacetSep_KTH Royal Institute of Technology [Stockholm]"
+                        ],
+                        "structNameId_fs": [
+                              "K_AlphaSep_KTH Royal Institute of Technology [Stockholm]_FacetSep_366312"
+                        ],
+                        "structName_fs": [
+                              "K_AlphaSep_KTH Royal Institute of Technology [Stockholm]"
+                        ],
+                        "structAcronym_s": [
+                              "KTH"
+                        ],
+                        "structName_s": [
+                              "KTH Royal Institute of Technology [Stockholm]"
+                        ],
+                        "structAddress_s": [
+                              "SE-100 44, Stockholm, Sweden"
+                        ],
+                        "structCountry_s": [
+                              "se"
+                        ],
+                        "structType_s": [
+                              "institution"
+                        ],
+                        "structValid_s": [
+                              "VALID"
+                        ],
+                        "structRorIdExt_s": [
+                              "https://ror.org/026vcq606"
+                        ],
+                        "structRorIdExtUrl_s": [
+                              "https://ror.org/https://ror.org/026vcq606"
+                        ],
+                        "contributorId_i": 159508,
+                        "contributorFullName_s": "Martin Monperrus",
+                        "contributorIdFullName_fs": "159508_FacetSep_Martin Monperrus",
+                        "contributorFullNameId_fs": "Martin Monperrus_FacetSep_159508",
+                        "language_s": [
+                              "en"
+                        ],
+                        "halId_s": "hal-01956501",
+                        "uri_s": "https://hal.science/hal-01956501v6",
+                        "version_i": 6,
+                        "status_i": 11,
+                        "instance_s": "hal",
+                        "sid_i": 1,
+                        "submitType_s": "file",
+                        "docType_s": "REPORT",
+                        "docSubType_s": "TECHREPORT",
+                        "oldDocType_s": "REPORT",
+                        "thumbId_i": 9278270,
+                        "selfArchiving_bool": true,
+                        "authorityInstitution_s": [
+                              "HAL Archives Ouvertes"
+                        ],
+                        "number_s": [
+                              "hal-01956501"
+                        ],
+                        "reportType_s": "4",
+                        "inPress_bool": false,
+                        "modifiedDate_tdate": "2023-09-14T03:36:44Z",
+                        "modifiedDate_s": "2023-09-14 03:36:44",
+                        "modifiedDateY_i": 2023,
+                        "modifiedDateM_i": 9,
+                        "modifiedDateD_i": 14,
+                        "submittedDate_tdate": "2023-09-12T14:40:27Z",
+                        "submittedDate_s": "2023-09-12 14:40:27",
+                        "submittedDateY_i": 2023,
+                        "submittedDateM_i": 9,
+                        "submittedDateD_i": 12,
+                        "releasedDate_tdate": "2023-09-13T10:56:36Z",
+                        "releasedDate_s": "2023-09-13 10:56:36",
+                        "releasedDateY_i": 2023,
+                        "releasedDateM_i": 9,
+                        "releasedDateD_i": 13,
+                        "producedDate_tdate": "2018-01-01T00:00:00Z",
+                        "producedDate_s": "2018",
+                        "producedDateY_i": 2018,
+                        "publicationDate_tdate": "2018-01-01T00:00:00Z",
+                        "publicationDate_s": "2018",
+                        "publicationDateY_i": 2018,
+                        "owners_i": [
+                              159508
+                        ],
+                        "collId_i": [
+                              4731
+                        ],
+                        "collName_s": [
+                              "LARA"
+                        ],
+                        "collCode_s": [
+                              "LARA"
+                        ],
+                        "collCategory_s": [
+                              "THEME"
+                        ],
+                        "collIdName_fs": [
+                              "4731_FacetSep_LARA"
+                        ],
+                        "collNameId_fs": [
+                              "LARA_FacetSep_4731"
+                        ],
+                        "collCodeName_fs": [
+                              "LARA_FacetSep_LARA"
+                        ],
+                        "collCategoryCodeName_fs": [
+                              "THEME_JoinSep_LARA_FacetSep_LARA"
+                        ],
+                        "collNameCode_fs": [
+                              "LARA_FacetSep_LARA"
+                        ],
+                        "fileMain_s": "https://hal.science/hal-01956501/document",
+                        "files_s": [
+                              "https://hal.science/hal-01956501/file/repair-living-review.pdf"
+                        ],
+                        "fileType_s": [
+                              "file"
+                        ],
+        """
+        if response.status_code == 200:
+            hal_data = response.json()
+            # Extract data from HAL response
+            docs = hal_data.get("response", {}).get("docs", [])
+            if not docs:
+                return None
+
+            doc = docs[0]
+
+            # Extract title
+            title = None
+            if "title_s" in doc:
+                title = doc["title_s"][0] if isinstance(doc["title_s"], list) else doc["title_s"]
+
+            # Extract authors
+            authors = ""
+            if "authFullName_s" in doc:
+                author_list = doc["authFullName_s"]
+                if isinstance(author_list, list):
+                    authors = ", ".join(author_list)
+                else:
+                    authors = author_list
+
+            # Extract abstract
+            abstract = None
+            if "abstract_s" in doc:
+                abstract = doc["abstract_s"][0] if isinstance(doc["abstract_s"], list) else doc["abstract_s"]
+
+            # Extract DOI
+            doi = None
+            if "doiId_s" in doc:
+                doi = doc["doiId_s"]
+
+            # Extract venue/publication info
+            venue_title = None
+            if "journalTitle_s" in doc:
+                venue_title = doc["journalTitle_s"]
+            elif "bookTitle_s" in doc:
+                venue_title = doc["bookTitle_s"]
+            elif "conferenceTitle_s" in doc:
+                venue_title = doc["conferenceTitle_s"]
+
+            # Extract year for note
+            year = doc.get("producedDateY_i", "")
+            note = f"Published: {year}" if year else ""
+
+            return {
+                "url": url,
+                "semanticscholarid": None,
+                "tldr": None,
+                "authors": authors,
+                "venue_title": venue_title,
+                "doi": doi,
+                "abstract": abstract,
+                "title": title,
+                "note": note
+            }
+    except Exception as e:
+        print(f"Error fetching HAL metadata for {hal_id}: {e}")
+        return None
+
+
+
 def collect_paper_data_from_url(url):
     """
 
@@ -1053,6 +1467,9 @@ def collect_paper_data_from_url(url):
             return collect_paper_data_from_doi(doi)
         except Exception as e:
             print("doi error",doi)
+    if "/hal.science/" in url:    
+        ## https://www.monperrus.net/martin/arxiv-json.py?id=2304.12015
+        return collect_paper_data_from_hal(url)
 
 
 
