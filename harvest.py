@@ -876,7 +876,6 @@ def info_from_crossref(doi):
     publisher = message.get("publisher", "")
 
     note = ""
-    note = f"Published: {published_date}"
     
     year = message.get("published", {}).get("date-parts", [[]])[0][0] if message.get("published") else ""
     # Create the formatted output
