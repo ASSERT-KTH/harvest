@@ -1,5 +1,13 @@
 #!/usr/bin/python
+"""
+DSpace bitstream URL processor 
+- for DSpace 6 and earlier via OAI-PMH
+- for DSpace 7+ via REST API.
 
+DSpace is one of the most widely-used open source repository platforms for institutional repositories, particularly in academic and research institutions.
+the most current estimate is over 3,000 DSpace instances worldwide
+DSpace is written in Java and is open source software released under the BSD license.
+"""
 
 import requests
 import sys
@@ -318,14 +326,13 @@ def oai_xml_to_json(data):
     return result
 
 
-
-
 def main_bitstream(download_url):
+    # DSpace bitstream URL DSpace 7+
     if "/bitstreams/" in download_url:
-        # DSpace bitstream URL DSpace 7+
         data = dspace_metadata_to_json(process_bitstream_url_dspace_7(download_url))
         return data
 
+    # DSpace bitstream URL DSpace 6 and earlier via OAI-PMH
     if "/bitstream/" in download_url:
         # python dspace_bitstreams.py https://orbilu.uni.lu/bitstream/10993/66145/1/thesis.pd
         # DSpace bitstream URL DSpace 6 and earlier via OAI-PMH
