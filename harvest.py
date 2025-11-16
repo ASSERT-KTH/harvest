@@ -4,9 +4,6 @@
 #
 # send notifications over email
 #
-# TODO: add support for searching in the main search engines
-# TODO: document the past matches on a web page
-# 
 # To make stats of reasons, as easy as jq .reason cache/harvest/*.json | freqlines
 #
 #  new search by scholar: curl -X GET "https://api.semanticscholar.org/graph/v1/snippet/search?query=program+repair+by+removing+the+mandatory+presence&limit=10" -H "x-api-key: "
@@ -36,9 +33,9 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import random
 
-
 from harvest_lib import *
 from semanticscholar_lib import *
+import dspace_bitstreams
 
 
 
@@ -382,7 +379,7 @@ def record_paper_as_seen(paper, **kwargs):
 
 def get_zotero_translator_service_url(url):
     """
-    seems that it always returns one single element
+    returns the zotero translator service output for the given url
     """
     fname = path_on_disk_internal_v2(url, "/home/martin/workspace/scholar-harvest/cache/get_zotero_translator_service/")
     if os.path.exists(fname):
@@ -410,7 +407,7 @@ def get_zotero_translator_service_url(url):
         result = data # happy path
 
         # the API of Zotero is not consistent, sometimes it returns a list, sometimes a dict
-        # probably because the individual translators arenot regularized
+        # probably because the individual translators are not regularized
         if not isinstance(data, list):
             result = [data]
 
@@ -1470,7 +1467,9 @@ def collect_paper_data_from_url(url):
         ## https://www.monperrus.net/martin/arxiv-json.py?id=2304.12015
         return collect_paper_data_from_hal(url)
 
-
+    # added Nov 2025
+    if "/bitstream/" in url or "/bitstreams/" in url:
+        return dspace_bitstreams.main_bitstream(url)
 
     if "arxiv.org/" in url:    
         ## https://www.monperrus.net/martin/arxiv-json.py?id=2304.12015
@@ -1896,6 +1895,7 @@ def notify_email(paper, service):
         'raw': base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8"), 
         "labelIds":['UNREAD', "Label_4447645605958895953"]
     }).execute()
+
     recorded = service.users().messages().get(userId='me', id=recorded["id"], format='metadata', metadataHeaders=['Message-Id']).execute()
 
 
@@ -1930,7 +1930,7 @@ def notify_email(paper, service):
     print("emailed", paper.category)
 
 def send_email(encoded_title, email,recipients):
-    print("TODO implement daily summary email for Markus and Deepika")
+    # print("TODO implement daily summary email for Markus and Deepika")
     return
     print("sending",recipients,encoded_title)
     # send the email
