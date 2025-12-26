@@ -686,7 +686,7 @@ def create_harvest_email_paper(paper, service, **kwargs):
         return False
     
     paper_data = collect_paper_data_from_url(paper.url)
-    # is this does not work
+    # logging cases where no metadata is available
     if paper_data["title"] == None or paper_data["title"] == "":
         parsed_url = urlparse(paper.url)
         domain = parsed_url.netloc
@@ -747,6 +747,7 @@ def is_high_reputation(url):
     check if the paper is from a high reputation source, before sending a notification
     discards mdpi, researchgate.net
     """
+    if not url: return False
     if "nature.com" in url: return True
     if "doi.org" in url: return True
     if "arxiv.org" in url: return True
@@ -762,6 +763,7 @@ def is_high_reputation(url):
     if "diva-portal.org" in url: return True
     if "hal.science" in url: return True
     if "ojs.aaai.org" in url: return True
+    if "bitstream" in url: return True # dspace, probably from a university repository
     return False
 
 
@@ -1464,12 +1466,13 @@ def collect_paper_data_from_url(url):
         except Exception as e:
             print("doi error",doi)
     if "/hal.science/" in url:    
-        ## https://www.monperrus.net/martin/arxiv-json.py?id=2304.12015
         return collect_paper_data_from_hal(url)
 
     # added Nov 2025
     if "/bitstream/" in url or "/bitstreams/" in url:
-        return dspace_bitstreams.main_bitstream(url)
+        dspace= dspace_bitstreams.main_bitstream(url)
+        if dspace:
+            return dspace
 
     if "arxiv.org/" in url:    
         ## https://www.monperrus.net/martin/arxiv-json.py?id=2304.12015
@@ -1585,6 +1588,7 @@ def collect_paper_data_from_url(url):
             pii = match.group(1)
             api_url = 'https://api.elsevier.com/content/article/pii/'+ pii + "?httpAccept=application/json"
             elsevier_data = requests.get(api_url, headers = {"x-els-apikey":config.sciencedirect_key}).json()
+            # print("elsevier_data",pii,json.dumps(elsevier_data, indent=2))
             if "full-text-retrieval-response" in elsevier_data:
                 venue_title = elsevier_data["full-text-retrieval-response"]["coredata"]["prism:publicationName"]
                 doi = elsevier_data["full-text-retrieval-response"]["coredata"]["prism:doi"]
@@ -1891,25 +1895,31 @@ def notify_email(paper, service):
     html_part = MIMEText(email_html_body, 'html', 'utf-8')
     msg.attach(html_part)
     
-    recorded = service.users().messages().insert(userId='me', body={
-        'raw': base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8"), 
-        "labelIds":['UNREAD', "Label_4447645605958895953"]
-    }).execute()
-
-    recorded = service.users().messages().get(userId='me', id=recorded["id"], format='metadata', metadataHeaders=['Message-Id']).execute()
-
-
     # add one single labelId tag to reduce reviewing time
     category_label_ids = [get_labelId(random.choice(paper.categories))]
-    if category_label_ids:
-        service.users().messages().modify(
-            userId='me', 
-            id=recorded["id"], 
-            body={'addLabelIds': category_label_ids}
-        ).execute()
-    
 
-    rfc822msgid = recorded["payload"]["headers"][0]['value']
+    recorded = service.users().messages().insert(userId='me', body={
+        'raw': base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8"), 
+        "labelIds":['UNREAD', "Label_4447645605958895953"] + category_label_ids
+    }).execute()
+
+    try:
+        recorded = service.users().messages().get(userId='me', id=recorded["id"], format='metadata', metadataHeaders=['Message-Id']).execute()
+
+        if category_label_ids:
+            pass
+            # already done
+            # service.users().messages().modify(
+            #     userId='me', 
+            #     id=recorded["id"], 
+            #     body={'addLabelIds': category_label_ids}
+            # ).execute()
+        
+
+        rfc822msgid = recorded["payload"]["headers"][0]['value']
+    except Exception as e:
+        print("error when getting message id, should probably sleep but this would become too slow", e)
+        rfc822msgid = None
     
     # test of sending emails, it works
     # if "webassembly" in paper.desc.lower(): # old sending emails vie gmail
