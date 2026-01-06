@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-
+# compares zotero translator service url and harvest data extraction
 import harvest
 import sys
 

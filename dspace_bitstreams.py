@@ -64,7 +64,7 @@ def process_bitstream_url_dspace_7(download_url):
         else:
             print("Bundle link not found in metadata")
     else:
-        print(f"\nMetadata not available (Status: {metadata_response.status_code})")
+        print(f"\nDSpace Metadata not available (Status: {metadata_response.status_code})")
 
 def dspace_metadata_to_json(data):
     """
@@ -76,6 +76,8 @@ def dspace_metadata_to_json(data):
 
     output: {'url': 'https://orbilu.uni.lu/bitstream/10993/66145/1/thesis.pdf', 'title': None, 'abstract': None, 'tldr': '', 'authors': '', 'authors_list': [], 'venue_title': None, 'doi': None, 'note': None}
     """
+    if data == None: return None
+
     result = {
         "url": data.get('identifier', {}).get('uri'),
         "title": None,
@@ -179,8 +181,12 @@ def process_bitstream_url_oai_pmh(download_url):
         "identifier": identifier
     }
 
-    resp = requests.get(base_url, params=params)
-    resp.raise_for_status()
+    # print(f"Fetching OAI-PMH record from {base_url} with identifier {identifier}")
+    try:
+        resp = requests.get(base_url, params=params, timeout=4)
+        resp.raise_for_status()
+    except (requests.exceptions.ConnectTimeout, requests.exceptions.ReadTimeout, requests.exceptions.HTTPError) as e:
+        return 
     xml = resp.text
     # print(xml)
 
@@ -336,7 +342,10 @@ def main_bitstream(download_url):
     if "/bitstream/" in download_url:
         # python dspace_bitstreams.py https://orbilu.uni.lu/bitstream/10993/66145/1/thesis.pd
         # DSpace bitstream URL DSpace 6 and earlier via OAI-PMH
-        data = oai_xml_to_json(process_bitstream_url_oai_pmh(download_url))
+        oai_data = process_bitstream_url_oai_pmh(download_url)
+        if oai_data is None:
+            return None
+        data = oai_xml_to_json(oai_data)
         return data
 
 if __name__ == "__main__":

@@ -8,6 +8,8 @@ import config
 import time
 from harvest_lib import *
 import embed
+import yaml
+from datetime import datetime
 # from harvest import *
 
 SEMANTICSCHOLAR_DELAY=1.0
@@ -71,6 +73,9 @@ def get_embedding(title, output_dir='/home/martin/workspace/scholar-harvest/cach
         if not data or not "embedding" in data or not data["embedding"] or "vector" not in data["embedding"]:
             os.remove(target_path)
             return get_embedding(title, output_dir, verbose, delay)
+        if "authors" not in data or not isinstance(data["authors"], str):
+            os.remove(target_path)
+            return get_embedding(title, output_dir, verbose, delay)
         if data and data["embedding"]:
             data["cached"] = True
             return data
@@ -119,10 +124,13 @@ def get_embedding(title, output_dir='/home/martin/workspace/scholar-harvest/cach
         semanticscholarid = resp["data"][0]["paperId"]
         
         # Get embeddings
-        url = f"https://api.semanticscholar.org/graph/v1/paper/{semanticscholarid}?fields=title,tldr,citationCount,embedding,embedding.specter_v2"
+        url = f"https://api.semanticscholar.org/graph/v1/paper/{semanticscholarid}?fields=authors,title,tldr,citationCount,embedding,embedding.specter_v2"
         resp = requests.get(url, headers={"x-api-key": config.semanticscholar_key})
         semanticscholarfull = resp.json()
-
+        if 'authors' in semanticscholarfull and isinstance(semanticscholarfull['authors'], list):
+            semanticscholarfull["authors_list"] = semanticscholarfull["authors"]
+            semanticscholarfull["authors"] = ", ".join([a["name"] for a in semanticscholarfull["authors"]]) if "authors" in semanticscholarfull else ""
+        # raise Exception(semanticscholarfull)
         if "embedding" not in semanticscholarfull or not semanticscholarfull["embedding"] or "vector" not in semanticscholarfull["embedding"]:
             not_found_path = path_on_disk_internal(title, not_found_dir)
             with open(not_found_path, "w") as f:
@@ -312,6 +320,72 @@ def get_recommended_papers(paper_id, cache_dir="/home/martin/workspace/scholar-h
     
     return data
 
+def get_citing_papers(paper_id, verbose=False):
+    """
+    Get papers that cite a given paper ID from Semantic Scholar API
+    
+    Example: 
+    python -c "from semanticscholar_lib import get_citing_papers; print(get_citing_papers('10.1145/3366423.3380143', True))"
+    Args:
+        paper_id (str): The Semantic Scholar paper ID
+        verbose (bool): Whether to print verbose output
+        
+    Returns:
+        list: List of citing papers or None if not found
+    """
+    cache_dir = "/home/martin/workspace/scholar-harvest/cache/citing_papers/"
+    
+    if not paper_id or paper_id.strip() == '':
+        raise Exception("Error: Empty paper ID")
+        return None
+        
+    # Ensure cache directory exists
+    os.makedirs(cache_dir, exist_ok=True)
+    
+    # Check if we already have cached citing papers
+    # Replace special characters in paper_id to create a safe filename
+    safe_paper_id = paper_id.replace("/", "_").replace(":", "_").replace("\\", "_")
+    cache_file = os.path.join(cache_dir, f"{safe_paper_id}.json")
+    # if os.path.exists(cache_file):
+    #     if verbose:
+    #         print(f"Loading cached citing papers for paper ID: {paper_id}")
+    #     with open(cache_file, "r") as f:
+    #         data = json.load(f)
+    #         return data
+    
+    if verbose:
+        print(f"Fetching citing papers from SemanticScholar API for paper ID: {paper_id}")
+        
+    url = f"https://api.semanticscholar.org/graph/v1/paper/{paper_id}/citations"
+    response = requests.get(url, headers={"x-api-key": config.semanticscholar_key})
+    
+    if response.status_code == 404:
+        if verbose:
+            print(f"No citing papers found for paper ID: {paper_id}")
+        return None
+        
+    response.raise_for_status()  # Raise an exception for bad status codes
+    data = response.json()
+    
+    if 'data' not in data or not data['data']:
+        if verbose:
+            print(f"No citations for paper ID: {paper_id}")
+        return []
+    
+    data = data["data"]
+    data = [d["citingPaper"]["paperId"] for d in data if "citingPaper" in d and "paperId" in d["citingPaper"] and d["citingPaper"]["paperId"]]
+
+    # Save to cache
+    with open(cache_file, "w") as f:
+        json.dump(data, f, indent=2)
+        
+    if verbose:
+        print(f"Found {len(data)} citing papers")
+        
+    # Respect rate limits
+    time.sleep(SEMANTICSCHOLAR_DELAY)
+
+    return data
 
 def get_cited_papers(paper_id, cache_dir="/home/martin/workspace/scholar-harvest/cache/cited_papers/", verbose=False):
     """
@@ -357,8 +431,11 @@ def get_cited_papers(paper_id, cache_dir="/home/martin/workspace/scholar-harvest
     response.raise_for_status()  # Raise an exception for bad status codes
     data = response.json()
     
+    if 'data' not in data or not data['data']:
+        raise Exception("No citations for paper ID: " + paper_id)
+    
     data = data["data"]
-    data = [d for d in data if "citedPaper" in d and "paperId" in d["citedPaper"] and d["citedPaper"]["paperId"]]
+    data = [d["citedPaper"]["paperId"] for d in data if "citedPaper" in d and "paperId" in d["citedPaper"] and d["citedPaper"]["paperId"]]
 
     # Save to cache
     with open(cache_file, "w") as f:
@@ -373,6 +450,176 @@ def get_cited_papers(paper_id, cache_dir="/home/martin/workspace/scholar-harvest
 
     return data
 
+def latex_sanitize_file(path):
+    """
+    Sanitize a file for LaTeX by escaping all special characters.
+
+    python -c "from semanticscholar_lib import latex_sanitize_file; latex_sanitize_file('test.txt')"
+    """
+    with open(path, "r") as f:
+        content = f.read()
+    sanitized_content = latex_sanitize(content)
+    with open(path, "w") as f:
+        f.write(sanitized_content)
+
+def latex_sanitize(string):
+    """
+    Sanitize a string for LaTeX by escaping all special characters.
+    https://claude.ai/chat/0ec82764-0548-4922-9f01-835ebf460276
+    Args:
+        string: The input string to sanitize
+    
+    Returns:
+        A string with LaTeX special characters properly escaped
+    """
+    if not isinstance(string, str):
+        return string
+    
+    # Dictionary mapping special characters to their LaTeX escaped versions
+    replacements = {
+        '\\': r'\textbackslash{}',
+        # '{': r'\{',
+        # '}': r'\}',
+        '$': r'\$',
+        '&': r'\&',
+        '%': r'\%',
+        '#': r'\#',
+        '_': r'\_',
+        '~': r'\textasciitilde{}',
+        '^': r'\textasciicircum{}',
+    }
+
+    # Common accents and diacritics that need special handling in LaTeX
+    accent_replacements = {
+        'á': r"\'a", 'à': r'\`a', 'â': r'\^a', 'ä': r'\"a', 'ã': r'\~a', 'å': r'\aa',
+        'é': r"\'e", 'è': r'\`e', 'ê': r'\^e', 'ë': r'\"e',
+        'í': r"\'i", 'ì': r'\`i', 'î': r'\^i', 'ï': r'\"i',
+        'ó': r"\'o", 'ò': r'\`o', 'ô': r'\^o', 'ö': r'\"o', 'õ': r'\~o', 'ø': r'\o',
+        'ú': r"\'u", 'ù': r'\`u', 'û': r'\^u', 'ü': r'\"u',
+        'ý': r"\'y", 'ÿ': r'\"y',
+        'ñ': r'\~n',
+        'ç': r'\c{c}',
+        'Á': r"\'A", 'À': r'\`A', 'Â': r'\^A', 'Ä': r'\"A', 'Ã': r'\~A', 'Å': r'\AA',
+        'É': r"\'E", 'È': r'\`E', 'Ê': r'\^E', 'Ë': r'\"E',
+        'Í': r"\'I", 'Ì': r'\`I', 'Î': r'\^I', 'Ï': r'\"I',
+        'Ó': r"\'O", 'Ò': r'\`O', 'Ô': r'\^O', 'Ö': r'\"O', 'Õ': r'\~O', 'Ø': r'\O',
+        'Ú': r"\'U", 'Ù': r'\`U', 'Û': r'\^U', 'Ü': r'\"U',
+        'Ý': r"\'Y", 'Ÿ': r'\"Y',
+        'Ñ': r'\~N',
+        'Ç': r'\c{C}',
+    }
+    
+    # Handle backslash first to avoid double-escaping
+    result = string.replace('\\', replacements['\\'])
+    
+    # Replace other special characters
+    for char, replacement in replacements.items():
+        if char != '\\':  # Already handled
+            result = result.replace(char, replacement)
+    
+    # Replace accented characters
+    for char, replacement in accent_replacements.items():
+        result = result.replace(char, replacement)
+    
+    return result
+
+def snippet_search(query, limit=100):
+    """
+    Search for paper snippets based on a query string using Semantic Scholar API
+    
+    Args:
+        query (str): The search query
+        limit (int): Maximum number of results to return (default 100)
+        
+    Returns:
+        dict: API response containing snippet search results
+
+    Usage:
+    python -c "from semanticscholar_lib import snippet_search; print(snippet_search('Ai fo science'))"
+    """
+    url = "https://api.semanticscholar.org/graph/v1/snippet/search"
+    params = {
+        "query": query,
+        "limit": limit
+    }
+    headers = {
+        "x-api-key": config.semanticscholar_key
+    }
+    
+    response = requests.get(url, params=params, headers=headers)
+    # {'data': [{'score': 0.5355408350010007, 'paper': {'corpusId': '279403245', 'title': 'Solving tricky quantum optics problems with assistance from (artificial) intelligence', 'authors': ['Manas Pandey', 'Bharath Hebbe Madhusudhana', 'Saikat Ghosh', 'Dmitry Budker'], 'openAccessInfo': {'license': None, 'status': None, 'disclaimer': 'Notice: This snippet is extracted from the open access paper or abstract available at https://arxiv.org/abs/2506.12770, which is subject to the license by the author or copyright owner provided with this content. Please go to the source to verify the license and copyright information for your use.'}}, 'snippet': {'text': 'The rapid emergence of artificial intelligence (AI) is changing the way science is done. As with many new tools (calculators, e-mail, internet, etc.), we usually begin by applying these tools to solve common tasks better than it is possible with existing tools (e.g., performing arithmetical operations with a calculator rather than a slide rule). However, the real power of new tools lies in enabling completely new uses such as collaborative paper writing with colleagues anywhere in the world, enabled by the Internet. We are convinced that the use of AI in science will bring a plethora of new uses and capabilities, some of which are already apparent today. An example is that AI is "democratizing" science by enabling any reasonably qualified scientist to perform sophisticated modeling using highly specialized algorithms, without the need to master software packages. AI takes the role of an expert colleague who can understand the "professor" formulating the question and is also able to run the dedicated software, thus eliminating the "middleman". \n\nHere, we describe how we test AI abilities and new ways of "interacting with the tool" with three problems in quantum optics: i. A straightforward question; however, known to trick even mature physicists in the field. \n\nii. A subtle problem with important applications that, while known for some years, is still a subject of current research. \n\niii. A problem of current research with an unsettled solution. \n\nBased on experience with these problems, we make observations regarding the possible utility of modern AI in the scientific process. In essence, every scientist now has access to sophisticated tools previously accessible only to specialists. This brings forward the importance of ideas rather than techniques. Of course, the speed with which ideas can be elaborated, tested in detail, and perhaps executed is higher. What used to take months and years can now be done in minutes. \n\nWe also remark on the striking similarity of the AI behavior to that of students. We need to explain here what exactly we mean by "AI". We test our problems on various stateof-the-art general-purpose models, accessible for public use (e.g., Gemini 2.5 Pro). When using different models, the details of the dialog are different; however, the overall results are broadly consistent across AI platforms.', 'snippetKind': 'body', 'section': 'Introduction', 'snippetOffset': {'start': 15, 'end': 2368}, 'annotations': {'refMentions': [{'start': 112, 'end': 149, 'matchedPaperCorpusId': None}], 'sentences': [{'start': 0, 'end': 88}, {'start': 89, 'end': 347}, {'start': 348, 'end': 521}, {'start': 522, 'end': 662}, {'start': 663, 'end': 875}, {'start': 876, 'end': 1058}, {'start': 1061, 'end': 1189}, {'start': 1190, 'end': 1278}, {'start': 1281, 'end': 1284}, {'start': 1285, 'end': 1403}, {'start': 1406, 'end': 1410}, {'start': 1411, 'end': 1468}, {'start': 1471, 'end': 1603}, {'start': 1604, 'end': 1712}, {'start': 1713, 'end': 1780}, {'start': 1781, 'end': 1887}, {'start': 1888, 'end': 1950}, {'start': 1953, 'end': 2034}, {'start': 2035, 'end': 2088}, {'start': 2089, 'end': 2210}, {'start': 2211, 'end': 2353}]}}}], 'retrievalVersion': 'pa1-v1'}
+    response.raise_for_status()
+    
+    # Respect rate limits
+    time.sleep(SEMANTICSCHOLAR_DELAY)
+    
+    return response.json()
+
+def paperId_to_bibtex(paperId):
+    """
+    python -c "from semanticscholar_lib import paperId_to_bibtex; print(paperId_to_bibtex('38f382ed157cd187d28e14c3eac36e3bed34071e'))"
+    """
+    url = f"https://api.semanticscholar.org/graph/v1/paper/{paperId}?fields=citationStyles,abstract"
+    response = requests.get(url, headers={"x-api-key": config.semanticscholar_key})
+    # {"paperId": "38f382ed157cd187d28e14c3eac36e3bed34071e", "citationStyles": {"bibtex": "@Article{Silva2024RepairBenchLO,\n author = {Andr\u00e9 Silva and Monperrus Martin},\n booktitle = {2025 IEEE/ACM International Workshop on Large Language Models for Code (LLM4Code)},\n journal = {2025 IEEE/ACM International Workshop on Large Language Models for Code (LLM4Code)},\n pages = {9-16},\n title = {RepairBench: Leaderboard of Frontier Models for Program Repair},\n year = {2024}\n}\n"}}
+    response.raise_for_status()
+    time.sleep(SEMANTICSCHOLAR_DELAY)
+    return response.json()
+
+def snippet_search_bibtex(query):
+    """
+    paper_search.py <query>
+
+    Search for papers using a query string and return snippets with BibTeX citations.
+    This function performs a snippet search with a limit of 5 results and retrieves
+    the corresponding BibTeX entries for each paper found.
+    Args:
+        query (str): The search query string to find relevant papers.
+    Returns:
+        str: A YAML-formatted string containing a list of dictionaries, where each
+            dictionary has the following keys:
+            - 'title' (str): The title of the paper
+            - 'snippet' (str): A text snippet from the paper relevant to the query
+            - 'bibtex' (str): The BibTeX citation entry for the paper
+            - 'abstract' (str): The abstract of the paper
+    Example:
+        - bibtex: '@article{...'
+          snippet: 'This paper discusses...'
+          title: 'Artificial Intelligence for Scientific Discovery'
+          abstract: 'In this work, we explore...'
+        ...
+    Note:
+        This function depends on snippet_search() and paperId_to_bibtex() functions.
+        The search is limited to 5 results by default.
+
+        
+    python -c "from semanticscholar_lib import snippet_search_bibtex; snippets = snippet_search_bibtex('Ai for science'); print(snippets)"
+
+
+    """
+    snippets = snippet_search(query, limit=5)
+    result = []
+    for snippet in snippets["data"]:
+        paper = paperId_to_bibtex("CorpusId:"+snippet["paper"]["corpusId"])
+        entry = {
+            "title": snippet["paper"]["title"],
+            "abstract": paper.get("abstract", ""),
+            "snippet": snippet["snippet"]["text"],
+            "bibtex": latex_sanitize(paper["citationStyles"]["bibtex"])
+        }
+        result.append(entry)
+
+    data = yaml.dump(result, default_flow_style=False, allow_unicode=True, encoding="utf-8", sort_keys=False)
+
+    # Save query and data to cache
+    cache_dir = os.path.expanduser("~/.cache/paper_search")
+    os.makedirs(cache_dir, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    cache_file = os.path.join(cache_dir, f"{timestamp}.yaml")
+    with open(cache_file, "wb") as f:
+        f.write(data)
+
+    return data
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:

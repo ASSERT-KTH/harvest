@@ -899,11 +899,13 @@ def collect_paper_data_from_arxiv(url):
         semanticscholarid=""
         tldr=""
         authors=""
+        author_list = []
         venue_title = None
         doi=None
         abstract = None
         title = None
         note = None
+        year = None
 
         # data
         ## https://www.monperrus.net/martin/arxiv-json.py?id=2304.12015
@@ -912,24 +914,54 @@ def collect_paper_data_from_arxiv(url):
         arxiv_id = components[-1].split("?")[0]
         # https://www.monperrus.net/martin/arxiv-json.py?id=2409.18952v1
         theurl = "https://www.monperrus.net/martin/arxiv-json.py?id="+arxiv_id
-        
-        # print(theurl, requests.get(theurl).text)
+
         arxiv_metadata = requests.get(theurl).json()
-        abstract = arxiv_metadata["summary"].replace("\n"," ")
-        authors = ", ".join([x["name"] for x in arxiv_metadata["author"]])
-        venue_title = arxiv_metadata["journal_ref"]
-        title = arxiv_metadata["title"]
+        abstract = (arxiv_metadata.get("summary") or "").replace("\n"," ")
+        # support both "author" and "authors" keys and different shapes
+        authors_data = arxiv_metadata.get("author") or []
+        # normalize to list of names
+        normalized = []
+        if isinstance(authors_data, dict):
+            # unlikely, but handle single dict
+            authors_data = [authors_data]
+        for x in authors_data:
+            if isinstance(x, dict):
+                name = x.get("name") or x.get("fullname") or x.get("given") or x.get("family") or ""
+                normalized.append(name.strip())
+            else:
+                normalized.append(str(x).strip())
+        author_list = [n for n in normalized if n]
+        authors = ", ".join(author_list)
+        venue_title = arxiv_metadata.get("journal_ref")
+        title = arxiv_metadata.get("title")
+
+        # extract year if available
+        if arxiv_metadata.get("published"):
+            m = re.search(r'(\d{4})', arxiv_metadata.get("published"))
+            if m:
+                year = int(m.group(1))
+        elif arxiv_metadata.get("published_parsed"):
+            try:
+                year = int(arxiv_metadata.get("published_parsed")[0])
+            except Exception:
+                pass
+        elif arxiv_metadata.get("created"):
+            m = re.search(r'(\d{4})', arxiv_metadata.get("created"))
+            if m:
+                year = int(m.group(1))
 
         return {
             "url": url,
             "semanticscholarid": semanticscholarid,
             "tldr": tldr,
             "authors": authors,
+            "author_list": author_list,
             "venue_title": venue_title,
             "doi": doi,
             "abstract": abstract,
             "title": title,
-            "note": note
+            "note": note,
+            "year": year
         }
     except Exception as e:
         print("error fetching arxiv metadata for "+url, e)
@@ -968,6 +1000,7 @@ def collect_paper_data_from_diva(url):
 
     # Call the DiVA API
     api_url = f"https://www.monperrus.net/martin/diva-urn-json.py?urn={diva_id}"
+    print(api_url)
     try:
         response = requests.get(api_url)
         response.raise_for_status()
@@ -2363,7 +2396,69 @@ def classify_semanticscholar():
         # we put it in the trash
         service.users().messages().trash(userId='me', id=m['id']).execute()
 
+def esc(s):
+    if not s:
+        return ""
+    return s.replace("{", r"\{").replace("}", r"\}").replace("\n", " ").strip()
 
+def to_bibtex(paper_data_dict):
+
+    title = paper_data_dict.get("title", "") or ""
+    if paper_data_dict.get("author_list"):
+        authors = " and ".join(paper_data_dict.get("author_list"))
+    else:
+        authors = paper_data_dict.get("authors", "") or ""
+    venue = paper_data_dict.get("venue_title", "") or ""
+    doi = paper_data_dict.get("doi", "") or ""
+    year = str(paper_data_dict.get("year", "") or "")
+    url = paper_data_dict.get("url", "") or ""
+    abstract = paper_data_dict.get("abstract", "") or ""
+    note = paper_data_dict.get("note", "") or ""
+    ssid = paper_data_dict.get("semanticscholarid", "") or ""
+
+    # key generation
+    if doi:
+        key = re.sub(r'[^0-9A-Za-z_-]+', '_', doi)
+    else:
+        first_author = "anon"
+        if authors:
+            first_author = authors.split(",")[0].split()[-1]
+        title_snip = re.sub(r'[^0-9A-Za-z]+', '', title[:30])
+        key = f"{first_author}{year or ''}{title_snip or 'X'}"
+
+    # authors -> BibTeX author list (best-effort)
+    if " and " in authors:
+        bib_authors = authors
+    elif "," in authors:
+        parts = [p.strip() for p in authors.split(",") if p.strip()]
+        # if "Last, First" style detected leave as is, else join with ' and '
+        if all(len(p.split()) >= 2 for p in parts):
+            bib_authors = " and ".join(parts)
+        else:
+            bib_authors = authors
+    else:
+        bib_authors = authors
+
+    fields = []
+    if bib_authors:
+        fields.append(f"  author = {{{esc(bib_authors)}}}")
+    if title:
+        fields.append(f"  title = {{{esc(title)}}}")
+    if venue:
+        fields.append(f"  journal = {{{esc(venue)}}}")
+    if year:
+        fields.append(f"  year = {{{esc(year)}}}")
+    if doi:
+        fields.append(f"  doi = {{{esc(doi)}}}")
+    if url:
+        fields.append(f"  url = {{{esc(url)}}}")
+    if abstract:
+        fields.append(f"  abstract = {{{esc(abstract)}}}")
+    bibtype = "techreport"
+    if venue or doi:
+        bibtype = "article"
+    body = ",\n".join(fields)
+    return f"@{bibtype}{{{key},\n{body}\n}}\n"
 
 if __name__ == '__main__':
     main()
