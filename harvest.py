@@ -2454,6 +2454,24 @@ def to_bibtex(paper_data_dict):
         fields.append(f"  url = {{{esc(url)}}}")
     if abstract:
         fields.append(f"  abstract = {{{esc(abstract)}}}")
+    # if arXiv url, add number field with arXiv id
+    arxiv_id = None
+    if url and "arxiv.org" in url:
+        m = re.search(r'([0-9]{4}\.[0-9]{4,5}(v\d+)?)|([a-z\-]+/\d{7})', url)
+        if m:
+            arxiv_id = m.group(0)
+        else:
+            # fallback: take last path segment and strip .pdf and query
+            try:
+                last = url.split('/')[-1]
+                last = last.split('?')[0]
+                last = last.replace('.pdf', '')
+                if last:
+                    arxiv_id = last
+            except:
+                arxiv_id = None
+    if arxiv_id:
+        fields.append(f"  number = {{arXiv:{esc(arxiv_id)}}}")
     bibtype = "techreport"
     if venue or doi:
         bibtype = "article"
