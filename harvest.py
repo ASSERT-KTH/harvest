@@ -728,17 +728,20 @@ def create_harvest_email_paper(paper, service, **kwargs):
     
     paper.categories = [x[1] for x in compute_category_keywords_paper(paper)]
 
+    # backward compatibility
+
     paper.category = paper.categories[0] 
 
     paper.detection_date = detection_date.isoformat()
+    record_paper_as_seen(paper)
 
+    ### now, send notifications via appropriate channel
     # notify if high reputation only   
     if is_high_reputation(paper.url):
         notify_email(paper, service)
     else: 
         print("no reputation for "+origin_url+" not sending notification")   
 
-    record_paper_as_seen(paper)
 
     return True
 
@@ -764,6 +767,8 @@ def is_high_reputation(url):
     if "hal.science" in url: return True
     if "ojs.aaai.org" in url: return True
     if "bitstream" in url: return True # dspace, probably from a university repository
+    if "handle.net" in url: return True
+    if "google.com" in url: return True
     return False
 
 
@@ -774,7 +779,6 @@ def collect_paper_data_from_doi(doi):
 def collect_paper_data_from_url_with_cache(url):
     urlseen, thepath = already_seen_url(url,"/home/martin/workspace/scholar-harvest/cache/harvest/")
     if urlseen:
-        # print(thepath)
         with open(thepath, "r") as f:
             data = json.load(f)
             if not data or "title" not in data or not data["title"] or len(data["title"])==0:
@@ -788,8 +792,10 @@ def collect_paper_data_from_url_with_cache(url):
                 print("inconsistent data in cache, removing", thepath)
                 os.remove(thepath)
     data = collect_paper_data_from_url(url)
-    assert len(data["title"])>0,(url,data)
+    if "doi" in data and data["doi"]:
+        data["doi"] = data["doi"].lower().replace("https://doi.org/","").replace("http://doi.org/","")
     if data:
+        assert data["title"] and len(data["title"])>0,(url,data)
         with open(thepath, "w") as f:
             f.write(json.dumps(data))
         _,titlepath = already_seen_url(data["title"],"/home/martin/workspace/scholar-harvest/cache/harvest/")
@@ -1782,7 +1788,114 @@ def collect_paper_data_from_mdpi(url):
         "note": note
     }
     
+def collect_paper_data_from_openreview(url):
+    """
+    Extract metadata from an OpenReview URL using the OpenReview public API.
+    Returns a dict with keys similar to other collectors:
+    {url, title, semanticscholarid, abstract, tldr, authors, venue_title, doi, note, year}
 
+    Example:
+
+    python -c "import harvest; print(harvest.collect_paper_data_from_openreview('https://openreview.net/pdf?id=BCS7HHInC2'))"
+    """
+    # extract id from query or path
+    parsed = urlparse(url)
+    q = urllib.parse.parse_qs(parsed.query)
+    forum_id = q.get('id', [None])[0]
+    if not forum_id:
+        parts = [p for p in parsed.path.split('/') if p]
+        # common patterns: /forum?id=..., /pdf?id=..., /pdf/ID, /forum/ID
+        for i, p in enumerate(parts):
+            if p in ('forum', 'pdf', 'notes') and i + 1 < len(parts):
+                forum_id = parts[i + 1]
+                break
+        if not forum_id and parts:
+            # fallback: last path segment may be the id
+            forum_id = parts[-1]
+
+    if not forum_id:
+        return None
+
+    api_url = f"https://api2.openreview.net/notes?forum={forum_id}&limit=1"
+    resp = requests.get(api_url, timeout=10)
+    if resp.status_code != 200:
+        raise Exception(f"OpenReview API error {resp.status_code} for forum {forum_id}")
+    data = resp.json()
+
+    # API can return 'notes' or 'rows'
+    notes = data.get('notes') or data.get('rows') or []
+    if not notes:
+        return None
+    note = notes[0]
+
+    content = note.get('content', {}) if isinstance(note, dict) else {}
+    title = content.get('title') or note.get('title') or ""
+    abstract = content.get('abstract') or content.get('summary') or ""
+    # authors often a list
+    authors_list = content.get('authors').get('value') or content.get('authorids') or []
+
+    venue_title = content.get('venue').get('value') if content.get('venue') else None
+    doi = content.get('doi') or content.get('paper_doi') or None
+
+    # try to extract year from 'date_submitted' or note 'tcdate' or 'created'
+    year = None
+    # try to extract year from various possible fields
+    year = None
+    try:
+        candidates = []
+        candidates.append(note.get('tcdate'))
+        candidates.append(note.get('mdate'))
+
+        for c in candidates:
+            if not c:
+                continue
+            # numeric timestamp (ms or s)
+            if isinstance(c, (int, float)) or (isinstance(c, str) and c.isdigit()):
+                try:
+                    ts = int(c)
+                    # if looks like milliseconds, convert
+                    if ts > 1e12:
+                        year = datetime.fromtimestamp(ts / 1000).year
+                    else:
+                        year = datetime.fromtimestamp(ts).year
+                    break
+                except Exception:
+                    pass
+            # ISO-like string
+            if isinstance(c, str):
+                s = c.strip()
+                # try ISO parse
+                try:
+                    s_iso = s.replace('Z', '+00:00') if s.endswith('Z') else s
+                    year = datetime.fromisoformat(s_iso).year
+                    break
+                except Exception:
+                    # fallback: regex search for 4-digit year
+                    m = re.search(r'([12]\d{3})', s)
+                    if m:
+                        year = int(m.group(1))
+                        break
+    except Exception:
+        year = None
+
+
+    # build a short note
+    note_txt = f"openreview_forum:{forum_id}"
+    if note.get('id'):
+        note_txt += f" id:{note.get('id')}"
+
+    return {
+        "url": url,
+        "title": title,
+        "semanticscholarid": "",
+        "abstract": abstract,
+        "tldr": "",
+        "author_list": authors_list,
+        "authors": " | ".join([a.strip() for a in authors_list]),
+        "venue_title": venue_title,
+        "doi": doi,
+        "year": year
+    }
 
 def collect_paper_data_from_semanticscholar(url):
     """
@@ -1862,6 +1975,13 @@ def old_code_for_tldr():
 
 
 def notify_email(paper, service):
+    """
+    Send an email notification about a new paper using the Gmail API.
+    """
+    path = path_on_disk_internal_v2(paper.desc, "/home/martin/workspace/scholar-harvest/cache/already_notified/")
+    if os.path.exists(path):
+        return    
+
     # create an email body with the paper
     encoded_title = "=?utf-8?B?" + base64.b64encode(paper.desc.encode("utf-8")).decode("ascii") + "?="
     
@@ -1972,7 +2092,12 @@ def notify_email(paper, service):
     #print("unique_id", unique_id)
     print("emailed", paper.category)
 
-def send_email(encoded_title, email,recipients):
+    with open(path, 'w') as f:
+        f.write(str(time.time())+"\n")
+        if rfc822msgid:
+            f.write(rfc822msgid+"\n")
+
+def send_email(encoded_title, email, recipients):
     # print("TODO implement daily summary email for Markus and Deepika")
     return
     print("sending",recipients,encoded_title)
@@ -2471,12 +2596,28 @@ def to_bibtex(paper_data_dict):
             except:
                 arxiv_id = None
     if arxiv_id:
-        fields.append(f"  number = {{arXiv:{esc(arxiv_id)}}}")
+        fields.append(f"  number = {{   arXiv:{esc(arxiv_id)}}}")
     bibtype = "techreport"
     if venue or doi:
         bibtype = "article"
     body = ",\n".join(fields)
     return f"@{bibtype}{{{key},\n{body}\n}}\n"
+
+def compute_stats_missing_metadata():
+    """
+Analyze "cache/domains-no-api.support.jsonl" to output the top 10 missing domains to be supported
+
+python -c "import harvest; harvest.compute_stats_missing_metadata()"
+    """
+    counter = Counter()
+    with open("cache/domains-no-api.support.jsonl", "r") as f:
+        for line in f:
+            data = json.loads(line)
+            domain = data.get("domain", "unknown")
+            counter[domain] += 1
+    print("Top 10 missing domains to be supported:")
+    for domain, count in counter.most_common(10):
+        print(f"{domain}: {count}")
 
 if __name__ == '__main__':
     main()

@@ -10,6 +10,8 @@ from harvest_lib import *
 import embed
 import yaml
 from datetime import datetime
+import hashlib
+
 # from harvest import *
 
 SEMANTICSCHOLAR_DELAY=1.0
@@ -180,7 +182,7 @@ def get_semantic_scholar_id_from_title(title):
         
     # the service does not like column so removing them
     #  
-    title = title.replace(":","")
+    title = title.replace(":","").replace("'","").replace('’','')
 
     url = "https://api.semanticscholar.org/graph/v1/paper/search/match?query=" + title
 
@@ -196,6 +198,37 @@ def get_semantic_scholar_id_from_title(title):
     with open(fname, "w") as f:
         json.dump(data, f)
     return data
+
+def hash_string(s):
+    return hashlib.sha256(s.encode('utf-8')).hexdigest()
+
+def get_semantic_scholar_id_from_url(url, prefix = "URL:"):
+    """
+    Get the Semantic Scholar paper ID from a URL by calling 
+    https://api.semanticscholar.org/graph/v1/paper/URL:<url>
+    
+    Example:
+    python -c "from semanticscholar_lib import get_semantic_scholar_id_from_url; print(get_semantic_scholar_id_from_url('https://arxiv.org/abs/2409.18317'))"
+
+    with doi
+    python -c "from semanticscholar_lib import get_semantic_scholar_id_from_url; print(get_semantic_scholar_id_from_url('https://doi.org/10.1145/3366423.3380143'))"
+    """
+    os.makedirs("cache/get_semantic_scholar_id_from_url/", exist_ok=True)
+    fname = f"cache/get_semantic_scholar_id_from_url/{hash_string(url)}"
+    if os.path.exists(fname):
+        with open(fname, "r") as f:
+            data = json.load(f)
+            return data["paperId"]
+    semanticscholar = requests.get(f"https://api.semanticscholar.org/graph/v1/paper/{prefix}"+url, headers={"x-api-key": config.semanticscholar_key})
+    time.sleep(SEMANTICSCHOLAR_DELAY)
+    # semanticscholar.raise_for_status()
+    if semanticscholar.status_code != 200:
+        # raise Exception(f"Error fetching Semantic Scholar ID for URL {url}: {semanticscholar.status_code} {semanticscholar.text}")
+        return None
+    data = semanticscholar.json()
+    with open(fname, "w") as f:
+        json.dump(data, f)
+    return data["paperId"]
 
 def get_paper_info_from_semantic_scholar_id(semanticscholarid):
     """
@@ -325,9 +358,12 @@ def get_citing_papers(paper_id, verbose=False):
     Get papers that cite a given paper ID from Semantic Scholar API
     
     Example: 
-    python -c "from semanticscholar_lib import get_citing_papers; print(get_citing_papers('10.1145/3366423.3380143', True))"
-    Args:
-        paper_id (str): The Semantic Scholar paper ID
+    python -c "from semanticscholar_lib import get_citing_papers; print(get_citing_papers('doi:10.1145/3366423.3380143'))"
+
+    python -c "from semanticscholar_lib import get_citing_papers; print(get_citing_papers('arxiv:2411.18401'))"
+
+        Args:
+        paper_id (str): The Semantic Scholar paper ID or external ID (e.g., DOI, ArXiv) with prefix
         verbose (bool): Whether to print verbose output
         
     Returns:
@@ -367,9 +403,8 @@ def get_citing_papers(paper_id, verbose=False):
     response.raise_for_status()  # Raise an exception for bad status codes
     data = response.json()
     
+    # print(paper_id,data)
     if 'data' not in data or not data['data']:
-        if verbose:
-            print(f"No citations for paper ID: {paper_id}")
         return []
     
     data = data["data"]
@@ -432,8 +467,8 @@ def get_cited_papers(paper_id, cache_dir="/home/martin/workspace/scholar-harvest
     data = response.json()
     
     if 'data' not in data or not data['data']:
-        raise Exception("No citations for paper ID: " + paper_id)
-    
+        return []
+        
     data = data["data"]
     data = [d["citedPaper"]["paperId"] for d in data if "citedPaper" in d and "paperId" in d["citedPaper"] and d["citedPaper"]["paperId"]]
 

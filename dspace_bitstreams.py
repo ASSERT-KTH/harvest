@@ -78,8 +78,27 @@ def dspace_metadata_to_json(data):
     """
     if data == None: return None
 
+    url = None
+
+    # first strategy: look for dc.identifier.uri
+    md = data.get("metadata", {}) if isinstance(data, dict) else {}
+    cands = md.get("dc.identifier.uri") or md.get("dc.identifier") or []
+    if cands:
+        first = cands[0]
+        if isinstance(first, dict):
+            url = first.get("value")
+        elif isinstance(first, str):
+            url = first
+    if not url:
+        # second strategy: look for top-level identifier
+        ident = data.get("identifier")
+        if isinstance(ident, dict):
+            url = ident.get("uri")
+        elif isinstance(ident, str):
+            url = ident
+            
     result = {
-        "url": data.get('identifier', {}).get('uri'),
+        "url": url,
         "title": None,
         "abstract": None,
         "tldr": "",

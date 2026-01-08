@@ -20,7 +20,7 @@ def DEPRECATED_path_on_disk_internal_v1(papertitle, prefix):
     papertitle = papertitle.strip().rstrip(".").replace("   "," ").replace("  "," ")
     return prefix+hashlib.sha256(papertitle.encode("utf-8")).hexdigest()+".json"
 def path_on_disk(paper):
-    return path_on_disk_internal_v2(paper.desc)
+    return path_on_disk_internal_v2(paper.desc, "/home/martin/workspace/scholar-harvest/cache/harvest/")
 def path_on_disk_internal(papertitle, prefix = "/home/martin/workspace/scholar-harvest/cache/harvest/"):
     return path_on_disk_internal_v2(papertitle, prefix)
 
