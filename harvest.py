@@ -388,8 +388,8 @@ def get_zotero_translator_service_url(url):
                 # print(fname)
                 return json.load(f)
             except Exception as e:
-                print("error loading json",fname)
-                raise e
+                os.remove(fname)
+                return None
     resp = requests.post("https://t0guvf0w17.execute-api.us-east-1.amazonaws.com/Prod/web", data = url, headers ={"Content-Type": "text/plain"})
     ## argh, Zotero sometimes return a list, sometimes a dictionary, that's really bad
     # print(resp.status_code, resp.text)
@@ -748,7 +748,7 @@ def create_harvest_email_paper(paper, service, **kwargs):
 def is_high_reputation(url):
     """
     check if the paper is from a high reputation source, before sending a notification
-    discards mdpi, researchgate.net
+    discards mdpi, researchgate.net (no API)
     """
     if not url: return False
     if "nature.com" in url: return True
@@ -762,13 +762,14 @@ def is_high_reputation(url):
     if "link.springer.com" in url: return True
     if "onlinelibrary.wiley.com" in url: return True # metadata via zotero, via crossref
     if "sciencedirect.com" in url: return True
-    if "linkinghub.elsevier.com" in url: return True
+    if "elsevier.com" in url: return True
     if "diva-portal.org" in url: return True
     if "hal.science" in url: return True
     if "ojs.aaai.org" in url: return True
     if "bitstream" in url: return True # dspace, probably from a university repository
     if "handle.net" in url: return True
-    if "google.com" in url: return True
+    if "openreview.net" in url: return True
+    if "google.com" in url: return True # for patents.google.com mostly
     return False
 
 
@@ -792,17 +793,37 @@ def collect_paper_data_from_url_with_cache(url):
                 print("inconsistent data in cache, removing", thepath)
                 os.remove(thepath)
     data = collect_paper_data_from_url(url)
+    if not data:
+        try:
+            with open("cache/collect_paper_data_from_url_error.log", "a") as f:
+                f.write(url+"\n")
+            domain = urlparse(url).netloc or url
+            return None
+        except Exception:
+            domain = url
+            log_path = "cache/domains-no-api.support.jsonl"
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            with open(log_path, "a") as f:
+                f.write(json.dumps({"url": url, "domain": domain}) + "\n")
+            return None
     if "doi" in data and data["doi"]:
         data["doi"] = data["doi"].lower().replace("https://doi.org/","").replace("http://doi.org/","")
     if data:
-        assert data["title"] and len(data["title"])>0,(url,data)
-        with open(thepath, "w") as f:
-            f.write(json.dumps(data))
-        _,titlepath = already_seen_url(data["title"],"/home/martin/workspace/scholar-harvest/cache/harvest/")
-        # print("linking", thepath, "to", titlepath)  
-        if os.path.exists(titlepath):
-           os.remove(titlepath)
-        os.link(thepath, titlepath)
+        if not (data["title"] and len(data["title"])>0):
+            if os.path.isfile(thepath):
+                os.remove(thepath)
+            return None
+        if data["title"] and len(data["title"])>0:
+            print("\033[92m✔\033[0mgood, writing cache for ", url)
+            
+            with open(thepath, "w") as f:
+                f.write(json.dumps(data))
+
+            # double linking
+            _,titlepath = already_seen_url(data["title"],"/home/martin/workspace/scholar-harvest/cache/harvest/")
+            # print("linking", thepath, "to", titlepath)  
+            if not os.path.exists(titlepath):
+                os.link(thepath, titlepath)
     return data
 
 def get_paper_data_semanticscholar(title):
@@ -1522,30 +1543,8 @@ def collect_paper_data_from_url(url):
         return collect_paper_data_from_diva(url)
     
     if "dblp.org/" in url:
-        # https://dblp.org/rec/conf/icst/AlshammariAHB24.xml
-        # example https://www.monperrus.net/martin/dblp-json.py?id=conf/icst/AlshammariAHB24
-        components = [x for x in url.split("/") if len(x)>0]
-        dblp_id = "/".join(components[-3:])
-        # print("dblp_id",dblp_id)
-        # added Jan 2025
-        dblp_url = "https://www.monperrus.net/martin/dblp-json.py?id="+dblp_id
-        # print(dblp_url)
-        
-        dblp_resp = requests.get(dblp_url)
-        # print(dblp_url, dblp_resp.status_code, dblp_resp.text) # debug
-        dblp_metadata = dblp_resp.json()
-        venue_title = dblp_metadata["venue_title"]
-        authors = ", ".join(dblp_metadata["author"])
-        # print(dblp_metadata)
-        # DOI Chain from dblp
-        if "ee" in dblp_metadata and len(dblp_metadata["ee"])>0:
-            if "doi" in dblp_metadata["ee"][0]:
-                # print(dblp_metadata["ee"])
-                doi = dblp_metadata["ee"][0].replace("https://doi.org/","").replace("https://dx.doi.org/","")
-                return collect_paper_data_from_doi(doi)
-        # if "doi.org" in dblp_metadata["ee"]:
-        #     url = get_doi_target(dblp_metadata["ee"])
-        # print("TODO implement DOI and chain for DBLP")
+        return collect_paper_data_from_dblp(url)
+
 
     if "dl.acm.org" in url:
         components = [x for x in url.split("/") if len(x)>0]
@@ -1646,6 +1645,9 @@ def collect_paper_data_from_url(url):
         pass
 
     if "ieeexplore.ieee.org" in url:
+        # special case
+        url = url.replace("/figures#figures","")
+
         # rate limit see https://developer.ieee.org/API_Terms_of_Use2
         # not documented in response headers
         # rate limit on https://developer.ieee.org/apps/myapis
@@ -1660,7 +1662,9 @@ def collect_paper_data_from_url(url):
         else:
             ieeeid = [x for x in url.split("/") if len(x)>0][-1].replace(".pdf","")
         # curl "https://ieeexploreapi.ieee.org/api/v1/search/articles?apiKey=XXXXXX&article_number=10833642"
-        resp = requests.get("https://ieeexploreapi.ieee.org/api/v1/search/articles?article_number="+ieeeid+"&apiKey="+config.ieeexplore_key)
+
+        req_url = "https://ieeexploreapi.ieee.org/api/v1/search/articles?article_number="+ieeeid+"&apiKey="+config.ieeexplore_key
+        resp = requests.get(req_url)
         if resp.status_code != 418: # i'm a teapot, WTF?
             # print(resp.text)
             try:
@@ -1788,6 +1792,37 @@ def collect_paper_data_from_mdpi(url):
         "note": note
     }
     
+def collect_paper_data_from_dblp(url):
+    try:
+        # https://dblp.org/rec/conf/icst/AlshammariAHB24.xml
+        # example https://www.monperrus.net/martin/dblp-json.py?id=conf/icst/AlshammariAHB24
+        components = [x for x in url.split("/") if len(x)>0]
+        dblp_id = "/".join(components[-3:])
+        # print("dblp_id",dblp_id)
+        # added Jan 2025
+        dblp_url = "https://www.monperrus.net/martin/dblp-json.py?id="+dblp_id
+        # print(dblp_url)
+        
+        dblp_resp = requests.get(dblp_url)
+        # print(dblp_url, dblp_resp.status_code, dblp_resp.text) # debug
+        dblp_metadata = dblp_resp.json()
+        venue_title = dblp_metadata["venue_title"]
+        authors = ", ".join(dblp_metadata["author"])
+        # print(dblp_metadata)
+        # DOI Chain from dblp
+        if "ee" in dblp_metadata and len(dblp_metadata["ee"])>0:
+            if "doi" in dblp_metadata["ee"][0]:
+                # print(dblp_metadata["ee"])
+                doi = dblp_metadata["ee"][0].replace("https://doi.org/","").replace("https://dx.doi.org/","")
+                return collect_paper_data_from_doi(doi)
+        # if "doi.org" in dblp_metadata["ee"]:
+        #     url = get_doi_target(dblp_metadata["ee"])
+        # print("TODO implement DOI and chain for DBLP")
+    except Exception as e:
+        print("collect_paper_data_from_dblp",dblp_url, dblp_resp.status_code, dblp_resp.text) # debug
+        print("Error in collect_paper_data_from_dblp", e)
+    return None
+
 def collect_paper_data_from_openreview(url):
     """
     Extract metadata from an OpenReview URL using the OpenReview public API.

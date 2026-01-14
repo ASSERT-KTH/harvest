@@ -422,7 +422,7 @@ def get_citing_papers(paper_id, verbose=False):
 
     return data
 
-def get_cited_papers(paper_id, cache_dir="/home/martin/workspace/scholar-harvest/cache/cited_papers/", verbose=False):
+def get_cited_papers(paper_id, cache_dir="/home/martin/workspace/scholar-harvest/cache/cited_papers/", verbose=True):
     """
     Get papers cited by a given paper ID from Semantic Scholar API
     
@@ -465,7 +465,7 @@ def get_cited_papers(paper_id, cache_dir="/home/martin/workspace/scholar-harvest
         
     response.raise_for_status()  # Raise an exception for bad status codes
     data = response.json()
-    
+    print(paper_id,data)
     if 'data' not in data or not data['data']:
         return []
         
@@ -477,7 +477,7 @@ def get_cited_papers(paper_id, cache_dir="/home/martin/workspace/scholar-harvest
         json.dump(data, f, indent=2)
         
     if verbose:
-        cited_count = len(data.get('data', []))
+        cited_count = len(data)
         print(f"Found {cited_count} cited papers")
         
     # Respect rate limits

@@ -60,7 +60,12 @@ angles_deg = []
 results = []
 skipped = []
 
-for cited_id in semanticscholar_lib.get_cited_papers(paper_id["paperId"]) + semanticscholar_lib.get_citing_papers(paper_id["paperId"]):
+a=semanticscholar_lib.get_cited_papers(paper_id["paperId"])
+print("cited papers:", len(a))
+b=semanticscholar_lib.get_citing_papers(paper_id["paperId"])
+print("citing papers:", len(b))
+
+for cited_id in a+b:
     print("processing cited/citing paper id: " + str(cited_id))
     try:
         citedPaper = collect_paper_data_from_url_with_cache("https://www.semanticscholar.org/paper/" + cited_id)
