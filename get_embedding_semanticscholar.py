@@ -133,9 +133,6 @@ def process_cache(output_dir, delay=1.0, format_type='json', verbose=False):
  
 def download_and_save(title, output_dir = "/home/martin/workspace/scholar-harvest/cache/embedding.specter_v2/", verbose = False):
         result = get_embedding_and_push_to_db(title, output_dir, verbose)
-        # print(result)
-        # path = path_on_disk_internal_v2(title,prefix="cache/embedding.specter_v2/")
-        # with open(path,"w") as f: json.dump(result,f)
         return result
 
 def main():
