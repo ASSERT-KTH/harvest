@@ -1517,6 +1517,7 @@ def collect_paper_data_from_url(url):
     """
     title = None
     authors=""
+    author_list=None
     semanticscholarid=""
     tldr=""
     venue_title = None
@@ -1638,6 +1639,11 @@ def collect_paper_data_from_url(url):
                 title = elsevier_data["full-text-retrieval-response"]["coredata"]["dc:title"]
                 abstract = elsevier_data["full-text-retrieval-response"]["coredata"]["dc:description"]
                 url = url.replace('?dgcid=rss_sd_all','')
+                author_list = []
+                for x in elsevier_data["full-text-retrieval-response"]["coredata"]["dc:creator"]:
+                    author_list.append(x["$"])
+                authors = ", ".join(author_list)
+                # print(authors)
             # print(elsevier_data)
             # note the abstract is not available in the free version of the API
             # author = " and ".join([x["$"] for x in elsevier_data["full-text-retrieval-response"]["coredata"]["dc:creator"]])
@@ -1711,6 +1717,7 @@ def collect_paper_data_from_url(url):
         "abstract":abstract,
         "tldr": tldr,
         "authors": authors,
+        "author_list": author_list,
         "venue_title" : venue_title,
         "doi" : doi,
         "note" : note
