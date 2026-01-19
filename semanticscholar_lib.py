@@ -125,23 +125,7 @@ def get_embedding(title, output_dir='/home/martin/workspace/scholar-harvest/cach
             
         semanticscholarid = resp["data"][0]["paperId"]
         
-        # Get embeddings
-        url = f"https://api.semanticscholar.org/graph/v1/paper/{semanticscholarid}?fields=authors,title,tldr,citationCount,embedding,embedding.specter_v2"
-        resp = requests.get(url, headers={"x-api-key": config.semanticscholar_key})
-        semanticscholarfull = resp.json()
-        if 'authors' in semanticscholarfull and isinstance(semanticscholarfull['authors'], list):
-            semanticscholarfull["authors_list"] = semanticscholarfull["authors"]
-            semanticscholarfull["authors"] = ", ".join([a["name"] for a in semanticscholarfull["authors"]]) if "authors" in semanticscholarfull else ""
-        # raise Exception(semanticscholarfull)
-        if "embedding" not in semanticscholarfull or not semanticscholarfull["embedding"] or "vector" not in semanticscholarfull["embedding"]:
-            not_found_path = path_on_disk_internal(title, not_found_dir)
-            with open(not_found_path, "w") as f:
-                f.write(json.dumps({
-                    "url": url,
-                    "title": title,
-                    "response": resp.text
-                }, indent=2))
-
+        semanticscholarfull = get_embedding_from_paper_id(semanticscholarid,delay)
         # Respect rate limits
         print("grace delay for semanticscholar embedding call for ", title, file=sys.stderr)
         time.sleep(delay)
@@ -162,6 +146,57 @@ def get_embedding(title, output_dir='/home/martin/workspace/scholar-harvest/cach
         raise e
         return None
 
+def get_embedding_from_paper_id(semanticscholarid, delay=SEMANTICSCHOLAR_DELAY):
+    """
+    Get embedding and other details for a paper from its Semantic Scholar ID.
+    Includes caching support.
+    """
+    cache_dir = "/home/martin/workspace/scholar-harvest/cache/get_embedding_from_paper_id/"
+    os.makedirs(cache_dir, exist_ok=True)
+    fname = os.path.join(cache_dir, f"{semanticscholarid}.json")
+
+    not_found_dir = "cache/404/"
+    os.makedirs(not_found_dir, exist_ok=True)
+    # Note: 'title' is not available in this function; assuming it's passed or derived if needed
+    # For now, using semanticscholarid as a placeholder for title in path
+    not_found_path = os.path.join(not_found_dir, f"{semanticscholarid}.json")
+
+    if os.path.exists(fname):
+        if (time.time() - os.path.getmtime(not_found_path) < 21 * 24 * 60 * 60):
+            os.remove(not_found_path)
+            return get_embedding_from_paper_id(semanticscholarid, delay)
+        with open(fname, "r") as f:
+            return json.load(f)
+        
+    
+    
+    # Get embeddings
+    url = f"https://api.semanticscholar.org/graph/v1/paper/{semanticscholarid}?fields=authors,title,tldr,citationCount,embedding,embedding.specter_v2"
+    resp = requests.get(url, headers={"x-api-key": config.semanticscholar_key})
+    semanticscholarfull = resp.json()
+
+    if 'authors' in semanticscholarfull and isinstance(semanticscholarfull['authors'], list):
+        semanticscholarfull["authors_list"] = semanticscholarfull["authors"]
+        semanticscholarfull["authors"] = ", ".join([a["name"] for a in semanticscholarfull["authors"]]) if "authors" in semanticscholarfull else ""
+    # raise Exception(semanticscholarfull)
+    if "embedding" not in semanticscholarfull or not semanticscholarfull["embedding"] or "vector" not in semanticscholarfull["embedding"]:
+        data = {
+                "url": url,
+                "semanticscholarid": semanticscholarid,
+                "response": resp.text,
+                "embedding": None
+            }
+        with open(not_found_path, "w") as f:
+            f.write(json.dumps(data, indent=2))
+        return data
+    
+    semanticscholarfull["url"] = url
+
+    # Save to cache
+    with open(fname, "w") as f:
+        json.dump(semanticscholarfull, f, indent=2)
+    
+    return semanticscholarfull
 
 
 def get_semantic_scholar_id_from_title(title):

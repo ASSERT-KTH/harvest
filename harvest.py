@@ -1100,6 +1100,10 @@ def collect_paper_data_from_diva(url):
     }
 
 def collect_paper_data_from_hal(url):
+    """
+    python -c "import harvest; print(harvest.collect_paper_data_from_hal('https://inria.hal.science/tel-05433201/file/thesis.pdf'))"
+    
+    """
     # example https://hal.science/hal-01956501/document
     # Extract HAL ID from URL
     hal_id = url.split("/")[3]
@@ -1519,13 +1523,14 @@ def collect_paper_data_from_url(url):
     doi=None
     abstract = None
     note = None
-    if "/doi.org/" in url:
-        doi = url.replace("https://doi.org/","").replace("http://doi.org/","")
+    if "doi.org/" in url:
+        doi = url.replace("https://dx.doi.org/","").url.replace("https://doi.org/","").replace("http://doi.org/","")
         try:
             return collect_paper_data_from_doi(doi)
         except Exception as e:
             print("doi error",doi)
-    if "/hal.science/" in url:    
+    if "hal.science/" in url:
+        # fould be hal.science or inria.hal.science or theses.hal.science    
         return collect_paper_data_from_hal(url)
 
     # added Nov 2025
@@ -1689,6 +1694,9 @@ def collect_paper_data_from_url(url):
 
     if "mdpi.com/" in url:
         return collect_paper_data_from_mdpi(url)
+
+    if "openreview.net/" in url:
+        return collect_paper_data_from_openreview(url)
 
     if title == None:
         # default from Zotero Translation Server
