@@ -205,6 +205,7 @@ class Paper:
         self.note = None
         self.category = None
         self.categories = []
+        self.origin = None
 
     def note_subject(self, subject):
         type_a = type_alert(subject)
@@ -247,6 +248,8 @@ class Paper:
             }
     def as_json(self):
         return json.dumps(self.as_dict())
+    def get_authors(self):
+        return self.authors if self.authors else ""
 
 
 class ScholarParserLXML:
@@ -977,6 +980,9 @@ def collect_paper_data_from_arxiv(url):
             if m:
                 year = int(m.group(1))
 
+        # we only point to the paper
+        url = url.replace("/abs/","/pdf/")
+        
         return {
             "url": url,
             "semanticscholarid": semanticscholarid,
@@ -2075,7 +2081,7 @@ def notify_email(paper, service):
 {f"<p><strong>Venue:</strong> {paper.venue_title}</p>" if paper.venue_title else ""}
 {f"<p><strong>TLDR:</strong> {paper.tldr}</p>" if paper.tldr else ""}
 {f"<p><strong>Abstract:</strong> {paper.abstract}</p>" if paper.abstract else ""}
-{f"<p><strong>Authors:</strong> {paper.authors}</p>" if paper.authors else ""}
+{f"<p><strong>Authors:</strong> {paper.get_authors()}</p>"}
 <p><strong>Category:</strong> {", ".join(paper.categories)}</p>
 <p><strong>Reason:</strong> {paper.print_reason()}</p>
 {f"<pre>{paper.note}</pre>" if paper.note else ""}
@@ -2099,7 +2105,9 @@ def notify_email(paper, service):
     msg.attach(html_part)
     
     # add one single labelId tag to reduce reviewing time
-    category_label_ids = [get_labelId(random.choice(paper.categories))]
+    category_label_ids = []
+    label = get_labelId(random.choice(paper.categories))
+    category_label_ids.append(label)
 
     recorded = service.users().messages().insert(userId='me', body={
         'raw': base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8"), 
@@ -2168,8 +2176,16 @@ def send_email(encoded_title, email, recipients):
     sendemail.send_email(args)
     
 def get_labelId(category):
+    """
+        get the Gmail labelId for a given category
+    """
+
     if category=="planetse": return "Label_816000980291680327"
-    return categories["readinglist - "+category]["labelId"]
+    label= categories["readinglist - "+category]["labelId"]
+    if label == None or label == "":
+        setup_categories()
+        return get_labelId(category)
+    return label 
 
 # def classify(reason_txt):
 #     return classify_internal(reason_txt)[1]
@@ -2668,6 +2684,40 @@ python -c "import harvest; harvest.compute_stats_missing_metadata()"
     print("Top 10 missing domains to be supported:")
     for domain, count in counter.most_common(10):
         print(f"{domain}: {count}")
+
+def collect_and_send_email(url):
+    """
+    Collect paper data from the given URL and send an email notification if it's a high-reputation source and not already seen.
+
+    python -c "import harvest; harvest.collect_and_send_email('https://arxiv.org/abs/2406.12345')"
+    """
+    
+    # Collect paper data with caching
+    paper_data = collect_paper_data_from_url_with_cache(url)
+    if not paper_data or not paper_data.get("title"):
+        print(f"No data collected for URL: {url}")
+        return False
+    
+    # Create a Paper object
+    paper = Paper(url, paper_data["title"])
+    paper.url = paper_data["url"]
+    paper.authors = paper_data.get("authors", "")
+    paper.abstract = paper_data.get("abstract", "")
+    paper.venue_title = paper_data.get("venue_title", "")
+    paper.tldr = paper_data.get("tldr", "")
+    paper.note = paper_data.get("note", "")
+    paper.detection_date = datetime.now().isoformat()
+    
+    # Classify the paper
+    paper.categories = [x[1] for x in compute_category_keywords_paper(paper)]
+    paper.category = paper.categories[0] if paper.categories else "uncategorized"
+    
+    # Set up Gmail service
+    service = build('gmail', 'v1', http=get_creds().authorize(Http()))
+    
+    # Check if high reputation and send notification
+    notify_email(paper, service)
+    
 
 if __name__ == '__main__':
     main()
