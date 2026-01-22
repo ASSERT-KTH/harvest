@@ -1885,10 +1885,14 @@ def collect_paper_data_from_openreview(url):
     note = notes[0]
 
     content = note.get('content', {}) if isinstance(note, dict) else {}
-    title = content.get('title') or note.get('title') or ""
+    title = content.get('title').get("value") or note.get('title').get("value") or ""
     abstract = content.get('abstract') or content.get('summary') or ""
     # authors often a list
-    authors_list = content.get('authors').get('value') or content.get('authorids') or []
+    authors_list = []
+    if content.get('authors'):
+        authors_list = content.get('authors').get('value') or content.get('authorids') or []
+    else:
+        authors_list.append("Anonymous OpenReview")
 
     venue_title = content.get('venue').get('value') if content.get('venue') else None
     doi = content.get('doi') or content.get('paper_doi') or None
