@@ -161,7 +161,7 @@ def get_embedding_from_paper_id(semanticscholarid, delay=SEMANTICSCHOLAR_DELAY):
     # For now, using semanticscholarid as a placeholder for title in path
     not_found_path = os.path.join(not_found_dir, f"{semanticscholarid}.json")
 
-    if os.path.exists(fname):
+    if os.path.exists(not_found_path):
         if (time.time() - os.path.getmtime(not_found_path) < 21 * 24 * 60 * 60):
             os.remove(not_found_path)
             return get_embedding_from_paper_id(semanticscholarid, delay)
