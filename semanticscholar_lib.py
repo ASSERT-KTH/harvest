@@ -152,6 +152,8 @@ def get_embedding_from_paper_id(semanticscholarid, delay=SEMANTICSCHOLAR_DELAY):
     Includes caching support.
     """
     cache_dir = "/home/martin/workspace/scholar-harvest/cache/get_embedding_from_paper_id/"
+
+    assert not semanticscholarid.startswith("http")
     os.makedirs(cache_dir, exist_ok=True)
     fname = os.path.join(cache_dir, f"{semanticscholarid}.json")
 
@@ -162,10 +164,10 @@ def get_embedding_from_paper_id(semanticscholarid, delay=SEMANTICSCHOLAR_DELAY):
     not_found_path = os.path.join(not_found_dir, f"{semanticscholarid}.json")
 
     if os.path.exists(not_found_path):
-        if (time.time() - os.path.getmtime(not_found_path) < 21 * 24 * 60 * 60):
+        if (time.time() - os.path.getmtime(not_found_path) > 21 * 24 * 60 * 60):
             os.remove(not_found_path)
             return get_embedding_from_paper_id(semanticscholarid, delay)
-        with open(fname, "r") as f:
+        with open(not_found_path, "r") as f:
             return json.load(f)
         
     
@@ -417,12 +419,21 @@ def get_citing_papers(paper_id, verbose=False):
     # Replace special characters in paper_id to create a safe filename
     safe_paper_id = paper_id.replace("/", "_").replace(":", "_").replace("\\", "_")
     cache_file = os.path.join(cache_dir, f"{safe_paper_id}.json")
-    # if os.path.exists(cache_file):
-    #     if verbose:
-    #         print(f"Loading cached citing papers for paper ID: {paper_id}")
-    #     with open(cache_file, "r") as f:
-    #         data = json.load(f)
-    #         return data
+
+    if os.path.exists(cache_file):
+        # Check if cache is older than 3 weeks
+        file_time = os.path.getmtime(cache_file)
+        current_time = time.time()
+        three_weeks_in_seconds = 21 * 24 * 60 * 60        
+        if current_time - file_time > three_weeks_in_seconds:
+            os.remove(cache_file)
+
+    if os.path.exists(cache_file):
+        with open(cache_file, "r") as f:
+            data = json.load(f)
+            return data
+
+    
     
     if verbose:
         print(f"Fetching citing papers from SemanticScholar API for paper ID: {paper_id}")

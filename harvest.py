@@ -32,6 +32,8 @@ from urllib.parse import urlparse
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import random
+import glob
+
 
 from harvest_lib import *
 from semanticscholar_lib import *
@@ -729,7 +731,7 @@ def create_harvest_email_paper(paper, service, **kwargs):
         
     paper.origin = origin
     
-    paper.categories = [x[1] for x in compute_category_keywords_paper(paper)]
+    paper.categories = [x[1] for x in compute_category_embedding(paper)]
 
     # backward compatibility
 
@@ -2111,7 +2113,8 @@ def notify_email(paper, service):
     # add one single labelId tag to reduce reviewing time
     category_label_ids = []
     label = get_labelId(random.choice(paper.categories))
-    category_label_ids.append(label)
+    if not label.startswith("https://"):
+        category_label_ids.append(label)
 
     recorded = service.users().messages().insert(userId='me', body={
         'raw': base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8"), 
@@ -2185,33 +2188,92 @@ def get_labelId(category):
     """
 
     if category=="planetse": return "Label_816000980291680327"
+    if "readinglist - "+category not in categories:
+        return "Label_4447645605958895953"
     label= categories["readinglist - "+category]["labelId"]
     if label == None or label == "":
         setup_categories()
         return get_labelId(category)
     return label 
 
-# def classify(reason_txt):
-#     return classify_internal(reason_txt)[1]
-
-def compute_category_keywords(paper):
+def compute_category_embedding_test():
     """
-      classify the paper based on keywords
-      categorize according to function classify_internal
+    For the 20 most recent papers in cache/harvest, compute the category based on embedding similarity
+    python -c "import harvest; harvest.compute_category_embedding_test()"
     """
+    paths = sorted(glob.glob("cache/harvest/*"), key=os.path.getmtime, reverse=True)[:50]
+    for path in paths:
+        with open(path, "r") as f:
+            paper_data = json.load(f)
+            paper = Paper(paper_data["url"], paper_data["title"])
+            categories = compute_category_embedding(paper)
+            if len(categories) > 0:
+                print(paper.desc)
+                print("categories:", categories)
+                print()
 
-    title = paper.desc.lower()
-    reason_txt = paper.print_reason()
+def compute_category_embedding(paper):
+    """
+    Compute the category based on the 5 nearest neighbors in embedding space
 
-    pattern1, classification1 = classify_internal(title)    
-
-    if classification1 != "uncategorized": return classification1
-
-    pattern2, classification2 = classify_internal(reason_txt)
+    python -c "import harvest; p=harvest.Paper('url','Testing machine learning based systems: a systematic mapping'); print(harvest.compute_category_embedding(p))"
+    """
+    # Get embedding for the paper
+    embedding_result = get_embedding_and_push_to_db(paper.desc)
+    if not embedding_result or not embedding_result.get("embedding") or not embedding_result["embedding"].get("vector"):
+        return [("embedding_similarity", "uncategorized (no embedding)")]
     
-    if classification2 != "uncategorized": return classification2
+    vector = embedding_result["embedding"]["vector"]
+    
+    # Search for similar papers in pinecone
+    similar_papers = rrs.search_in_pinecone_semanticscholar(paper.desc, vector, 5)
+        
+    # Collect categories from similar papers
+    category_counts = Counter()
+    for similar in similar_papers:
+        # Try to find the similar paper in our cache
+        title = similar.get("title", "")
+        # Create a temporary paper object for the similar paper
+        similar_paper = Paper(None, title)
+        categories = compute_category_based_past_classification(similar_paper)
+        for _, category in categories:
+            if category != "uncategorized":
+                category_counts[category] += 1
+    
+    # Return the most common category if we found any
+    if category_counts:
+        most_common = category_counts.most_common(1)[0]
+        return [(f"embedding_similarity_{most_common[1]}_neighbors", most_common[0])]
+    
+    return [("embedding_similarity", "uncategorized")]
+        
+_topic_mapping_cache = None
 
-    return "uncategorized"
+def compute_category_based_past_classification(paper):
+    """
+        in cache/link_to_topic_mapping.json title=>category
+        {
+    "online loans for software": "related_work_on_property-based_testing_for_program_repair__papers_tools.md",
+
+        check whether the paper is in the mapping else return uncategorized    
+    """
+    global _topic_mapping_cache
+    
+    if _topic_mapping_cache is None:
+        mapping_path = "cache/link_to_topic_mapping.json"
+        if os.path.exists(mapping_path):
+            with open(mapping_path, "r") as f:
+                _topic_mapping_cache = json.load(f)
+        else:
+            _topic_mapping_cache = {}
+    
+    title_lower = normalize_title(paper.desc.lower())
+    
+    # Check for exact match
+    if title_lower in _topic_mapping_cache:
+        return [("compute_category_based_past_classification", _topic_mapping_cache[title_lower])]
+        
+    return [("compute_category_based_past_classification", "uncategorized")]
 
 def compute_category_keywords_paper(paper):
     """
