@@ -34,10 +34,12 @@ from email.mime.text import MIMEText
 import random
 import glob
 
-
 from harvest_lib import *
 from semanticscholar_lib import *
 import dspace_bitstreams
+
+import gakomail as sendemail
+
 
 
 
@@ -46,8 +48,6 @@ import dspace_bitstreams
 sys.path.append("/home/martin/workspace/reviewer-recommendation-system/")
 import embed as rrs
 
-sys.path.append("/home/martin/bin/")
-import sendemail
 
 
 rrs.ensure_embedding_up()
