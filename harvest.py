@@ -365,7 +365,7 @@ def already_seen_url(url, prefix):
     assert prefix.endswith("/")
     thepath = prefix+hashlib.sha256(url.encode("utf-8")).hexdigest()+".json"
     return os.path.exists(thepath), thepath
-READING_NOTES=open("/home/martin/workspace/related-work-github/ASSERT-KTH-related-work/allall.md").read().lower()
+READING_NOTES=""
 def already_seen(paper):
     fname= path_on_disk(paper)
     if paper.desc.lower() in READING_NOTES: return True
@@ -2449,6 +2449,8 @@ def setup_categories():
             categories[label['name']]["labelId"] = label['id']
 
 def main():
+    global READING_NOTES
+    READING_NOTES=open("/home/martin/workspace/related-work-github/ASSERT-KTH-related-work/allall.md").read().lower()
     setup_categories()
     classify_scholarnotifications()
     classify_planetse()
