@@ -7,10 +7,13 @@ import json
 import config
 import time
 from harvest_lib import *
-import embed
 import yaml
 from datetime import datetime
 import hashlib
+
+try:
+    import embed
+except: pass
 
 # from harvest import *
 

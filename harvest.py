@@ -42,12 +42,13 @@ import gakomail as sendemail
 
 
 
-
-# ollama pull jeffh/intfloat-multilingual-e5-large-instruct:f16
-# kate /home/martin/workspace/reviewer-recommendation-system/embed.py
-sys.path.append("/home/martin/workspace/reviewer-recommendation-system/")
-import embed as rrs
-
+try:
+    # ollama pull jeffh/intfloat-multilingual-e5-large-instruct:f16
+    # kate /home/martin/workspace/reviewer-recommendation-system/embed.py
+    sys.path.append("/home/martin/workspace/reviewer-recommendation-system/")
+    import embed as rrs
+except:
+    pass
 
 
 rrs.ensure_embedding_up()
