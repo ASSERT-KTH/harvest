@@ -47,11 +47,11 @@ try:
     # kate /home/martin/workspace/reviewer-recommendation-system/embed.py
     sys.path.append("/home/martin/workspace/reviewer-recommendation-system/")
     import embed as rrs
+    rrs.ensure_embedding_up()
 except:
     pass
 
 
-rrs.ensure_embedding_up()
 
 
 RUN_TIMESTAMP = datetime.now().astimezone().isoformat()
