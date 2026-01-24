@@ -933,7 +933,7 @@ def collect_paper_data_from_arxiv(url):
         tldr=""
         authors=""
         author_list = []
-        venue_title = None
+        venue_title = "arXiv"
         doi=None
         abstract = None
         title = None
@@ -965,7 +965,7 @@ def collect_paper_data_from_arxiv(url):
                 normalized.append(str(x).strip())
         author_list = [n for n in normalized if n]
         authors = ", ".join(author_list)
-        venue_title = arxiv_metadata.get("journal_ref")
+        venue_title = arxiv_metadata.get("journal_ref") if arxiv_metadata.get("journal_ref") and len(arxiv_metadata.get("journal_ref")) > 0 else "arXiv"
         title = arxiv_metadata.get("title")
 
         # extract year if available
