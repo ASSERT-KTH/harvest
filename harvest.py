@@ -375,6 +375,7 @@ def record_paper_as_seen(paper, **kwargs):
     """
         we've already seen this paper, we create a file on disk accordingly
     """
+    raise Exception("deprecated")
     fname= path_on_disk(paper)
     with open(fname,"w") as f: 
         data = paper.as_dict()
@@ -677,6 +678,15 @@ def get_cdsl_doi(csdlid):
 
 
 def create_harvest_email_paper(paper, service, **kwargs):
+    """
+    python -c "import harvest; harvest.create_harvest_email_paper(harvest.Paper('https://doi.org/10.1145/3597503.3623337','title foo'), None)"
+
+    # Example usage with arXiv:
+    python -c "import harvest; harvest.create_harvest_email_paper(harvest.Paper('https://arxiv.org/abs/2304.12015','Deep Learning for Code'), None)"
+
+    """
+
+
     origin_url = paper.url
     if "https://scholar.google" in paper.url:
         # the paper will appear formally later
@@ -687,13 +697,13 @@ def create_harvest_email_paper(paper, service, **kwargs):
     if "origin" in kwargs: origin = kwargs["origin"]
     detection_date = "unknown_detection_date"
     if "detection_date" in kwargs: detection_date = kwargs["detection_date"]
-    
     if already_seen(paper):
         return False
     
-    paper_data = collect_paper_data_from_url(paper.url)
+    paper_data = collect_paper_data_from_url_with_cache(paper.url)
+    
     # logging cases where no metadata is available
-    if paper_data["title"] == None or paper_data["title"] == "":
+    if not paper_data or paper_data["title"] == None or paper_data["title"] == "":
         parsed_url = urlparse(paper.url)
         domain = parsed_url.netloc
         log_entry = {"domain": domain, "url": paper.url}
@@ -723,12 +733,7 @@ def create_harvest_email_paper(paper, service, **kwargs):
 
 
     # what we obtained from the endpoint
-    paper.venue_title = paper_data["venue_title"]
-    paper.url = paper_data["url"] # for some paper we replace with a better url (eg computer.org)
-    paper.tldr = paper_data["tldr"]
-    paper.authors = paper_data["authors"]
-    paper.abstract = paper_data["abstract"]
-    paper.note = paper_data["note"] if "note" in paper_data else ""
+    transfer_data_from_dict_to_paper(paper, paper_data)
         
     paper.origin = origin
     
@@ -738,8 +743,8 @@ def create_harvest_email_paper(paper, service, **kwargs):
 
     paper.category = paper.categories[0] 
 
-    paper.detection_date = detection_date.isoformat()
-    record_paper_as_seen(paper)
+    # now handle by collect_paper_data_from_url_with_cache above
+    # record_paper_as_seen(paper)
 
     ### now, send notifications via appropriate channel
     # notify if high reputation only   
@@ -765,10 +770,14 @@ def is_high_reputation(url):
     if "computer.org" in url: return True
     if "ieeexplore.ieee.org" in url: return True
     if "dl.acm.org" in url: return True
+
+    # main publishers
     if "link.springer.com" in url: return True
     if "onlinelibrary.wiley.com" in url: return True # metadata via zotero, via crossref
     if "sciencedirect.com" in url: return True
     if "elsevier.com" in url: return True
+    if "sagepub.com" in url: return True
+    
     if "diva-portal.org" in url: return True
     if "hal.science" in url: return True
     if "ojs.aaai.org" in url: return True
@@ -1534,7 +1543,7 @@ def collect_paper_data_from_url(url):
     abstract = None
     note = None
     if "doi.org/" in url:
-        doi = url.replace("https://dx.doi.org/","").url.replace("https://doi.org/","").replace("http://doi.org/","")
+        doi = url.replace("https://dx.doi.org/","").replace("https://doi.org/","").replace("http://doi.org/","")
         try:
             return collect_paper_data_from_doi(doi)
         except Exception as e:
@@ -2117,6 +2126,28 @@ def notify_email(paper, service):
     if not label.startswith("https://"):
         category_label_ids.append(label)
 
+    # 1. historical notification via gmail api
+    if service != None and str(type(service)) == "<class 'googleapiclient.discovery.Resource'>":
+        return push_email_via_gmail(service, msg, category_label_ids)
+    
+    # 2. new notification via direct SMTP email
+    notify_followers(paper, email_html_body)
+
+    # 3. test email to myself
+    send_email(paper.desc, email_html_body,"martin.monperrus@laposte.net")
+
+def push_email_via_gmail(service, msg, category_label_ids):
+    """
+    Push an email message to Gmail with the specified labels.
+    
+    Args:
+        service: Gmail API service object
+        msg: MIMEMultipart message object
+        category_label_ids: List of label IDs to apply to the message
+    
+    Returns:
+        tuple: (recorded message object, rfc822msgid or None)
+    """
     recorded = service.users().messages().insert(userId='me', body={
         'raw': base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8"), 
         "labelIds":['UNREAD', "Label_4447645605958895953"] + category_label_ids
@@ -2124,44 +2155,26 @@ def notify_email(paper, service):
 
     try:
         recorded = service.users().messages().get(userId='me', id=recorded["id"], format='metadata', metadataHeaders=['Message-Id']).execute()
-
-        if category_label_ids:
-            pass
-            # already done
-            # service.users().messages().modify(
-            #     userId='me', 
-            #     id=recorded["id"], 
-            #     body={'addLabelIds': category_label_ids}
-            # ).execute()
-        
-
         rfc822msgid = recorded["payload"]["headers"][0]['value']
     except Exception as e:
         print("error when getting message id, should probably sleep but this would become too slow", e)
         rfc822msgid = None
-    
+
+def notify_followers(paper, email_html_body):
     # test of sending emails, it works
     # if "webassembly" in paper.desc.lower(): # old sending emails vie gmail
     #     # send email to some collaborators
     #     res = service.users().messages().send(userId='me', body={
     #         'raw': base64.urlsafe_b64encode((header + email).replace('<martin.monperrus@gmail.com>','<monperrus@kth.se>,<xppcoder@gmail.com>,<benoit.baudry@umontreal.ca>').encode("utf-8")).decode("utf-8")
     #         }).execute()
-    if paper.category.lower() == "LLM on code".lower():
-        
-        send_email("[harvest] new paper about "+paper.category, email_html_body,"markus.borg@codescene.com,postmaster@monperrus.net")
+    if paper.category.lower() == "LLM on code".lower():        
+        # send_email("[harvest] new paper about "+paper.category, email_html_body,"markus.borg@codescene.com,postmaster@monperrus.net")
+        pass
         
     if paper.category.lower() == "Testing".lower():
-        send_email("[harvest] new paper about "+paper.category, email_html_body,"deepika.tiwari@systemverification.com,benoit.baudry@umontreal.ca,postmaster@monperrus.net")
+        # send_email("[harvest] new paper about "+paper.category, email_html_body,"deepika.tiwari@systemverification.com,benoit.baudry@umontreal.ca,postmaster@monperrus.net")
+        pass
 
-    # print(res)
-
-    #print("unique_id", unique_id)
-    print("emailed", paper.category)
-
-    with open(path, 'w') as f:
-        f.write(str(time.time())+"\n")
-        if rfc822msgid:
-            f.write(rfc822msgid+"\n")
 
 def send_email(encoded_title, email, recipients):
     # print("TODO implement daily summary email for Markus and Deepika")
@@ -2754,6 +2767,22 @@ python -c "import harvest; harvest.compute_stats_missing_metadata()"
     for domain, count in counter.most_common(10):
         print(f"{domain}: {count}")
 
+def transfer_data_from_dict_to_paper(paper, paper_data):
+    paper.url = paper_data["url"] if "url" in paper_data and len(paper_data["url"]) > 0 else paper.url
+    # OOPS for historical reasons paper.desc is title
+    paper.desc = paper_data["title"] if "title" in paper_data and len(paper_data["title"]) > 0 else paper.desc
+    if "author_list" in paper_data and paper_data["author_list"]:
+        paper.authors = " | ".join(paper_data["author_list"]) if "author_list" in paper_data and paper_data["author_list"] else ""
+        paper.author_list = paper_data["author_list"]
+    else:
+        paper.authors = paper_data.get("authors", "")
+    paper.abstract = paper_data.get("abstract", "")
+    paper.venue_title = paper_data.get("venue_title", "")
+    paper.year = paper_data.get("year", "unknown year")
+    paper.tldr = paper_data.get("tldr", "")
+    paper.note = paper_data.get("note", "")
+    paper.detection_date = datetime.now().isoformat()
+
 def collect_and_send_email(url):
     """
     Collect paper data from the given URL and send an email notification if it's a high-reputation source and not already seen.
@@ -2769,13 +2798,7 @@ def collect_and_send_email(url):
     
     # Create a Paper object
     paper = Paper(url, paper_data["title"])
-    paper.url = paper_data["url"]
-    paper.authors = paper_data.get("authors", "")
-    paper.abstract = paper_data.get("abstract", "")
-    paper.venue_title = paper_data.get("venue_title", "")
-    paper.tldr = paper_data.get("tldr", "")
-    paper.note = paper_data.get("note", "")
-    paper.detection_date = datetime.now().isoformat()
+    transfer_data_from_dict_to_paper(paper, paper_data)
     
     # Classify the paper
     paper.categories = [x[1] for x in compute_category_keywords_paper(paper)]
