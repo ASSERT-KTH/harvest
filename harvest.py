@@ -6,8 +6,7 @@
 #
 # To make stats of reasons, as easy as jq .reason cache/harvest/*.json | freqlines
 #
-#  new search by scholar: curl -X GET "https://api.semanticscholar.org/graph/v1/snippet/search?query=program+repair+by+removing+the+mandatory+presence&limit=10" -H "x-api-key: "
-# return the section and snippet, quite useful
+#
 # Author: Martin Monperrus
 
 from __future__ import print_function
@@ -1531,6 +1530,7 @@ def collect_paper_data_from_hal(url):
 
 def collect_paper_data_from_url(url):
     """
+    python -c "import harvest; print(harvest.collect_paper_data_from_url('https://doi.org/10.1145/3368089.3409733'))"
 
     """
     title = None
@@ -1613,7 +1613,8 @@ def collect_paper_data_from_url(url):
             venue_title=paper_data["publicationName"]
             abstract=paper_data["abstract"]
             title=paper_data["title"]
-            authors = " - ".join([x["creator"] for x in paper_data["creators"]])
+            author_list = [x["creator"] for x in paper_data["creators"]]
+            authors = " | ".join(author_list)
         else: print("no records found in Springer "+url)
 
         # print(springer_data)
@@ -1626,7 +1627,8 @@ def collect_paper_data_from_url(url):
         doi = cdsl_data["doi"]
         abstract = cdsl_data["abstract"]
         title = cdsl_data["title"]
-        authors = ", ".join([x["fullName"] for x in cdsl_data["authors"]])
+        author_list = [x["fullName"] for x in cdsl_data["authors"]]
+        authors = " | ".join(author_list)
         # print(cdsl_data)
         # at KTH we need to pass through IEEE Xplore and the DOI resolves to that
         url = "https://doi.org/"+doi
@@ -1831,6 +1833,7 @@ def collect_paper_data_from_dblp(url):
         # example https://www.monperrus.net/martin/dblp-json.py?id=conf/icst/AlshammariAHB24
         components = [x for x in url.split("/") if len(x)>0]
         dblp_id = "/".join(components[-3:])
+        dblp_id = dblp_id.replace(".html","").replace(".xml","")
         # print("dblp_id",dblp_id)
         # added Jan 2025
         dblp_url = "https://www.monperrus.net/martin/dblp-json.py?id="+dblp_id
