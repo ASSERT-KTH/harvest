@@ -65,6 +65,10 @@ citing_rx = re.compile("^(.*) [-–] (new citations|nya citat|de nouvelles citat
 related_rx = re.compile("^(.*) [-–] new related research$")
 search_rx = re.compile("^(.*) [-–] (new results|nya sökresultat)$")
 
+def doc():
+    return """
+        This is harvest.py, a tool to monitor the scientific literature.
+    """
 def type_alert(subject):
     subject = subject.replace('"','')
     am = author_rx.match(subject)
