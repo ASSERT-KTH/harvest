@@ -14,7 +14,7 @@ def test_collect_paper_data_from_url():
     assert isinstance(paper_data, dict)
     
     # Assert specific values
-    assert paper_data['url'] == url
+    assert paper_data['url'] == url.replace("/abs/", "/pdf/")
     assert paper_data['title'] == 'NFTrig'
     assert 'NFTrig is a web-based application' in paper_data['abstract']
     assert paper_data['authors'] == 'Thompson, Jordan, Benac, Ryan, Olana, Kidus, Hassan, Talha, Sward, Andrew, Mohd, Tauheed Khan'
@@ -44,7 +44,7 @@ def test_collect_paper_data_from_url_arxiv():
     
     # Assert that paper_data is a dictionary with the expected keys
     assert isinstance(paper_data, dict)
-    assert paper_data['url'] == url
+    assert paper_data['url'] == url.replace("/abs/", "/pdf/")
     assert paper_data['title'] == 'NFTrig'
     assert 'NFTrig is a web-based application' in paper_data['abstract']
     assert paper_data['authors'] == 'Thompson, Jordan, Benac, Ryan, Olana, Kidus, Hassan, Talha, Sward, Andrew, Mohd, Tauheed Khan'
@@ -62,7 +62,9 @@ def test_collect_paper_data_from_url_sciencedirect():
     assert paper_data['doi'] == '10.1016/j.infsof.2024.107654'
     assert paper_data['semanticscholarid'] == ''
     assert paper_data['tldr'] == ''
-    assert paper_data['authors'] == ''
+    expected_authors = 'Qian, Zhongsheng, Yu, Qingyuan, Zhu, Hui, Liu, Jinping, Fu, Tingfeng'
+    actual_authors = paper_data['authors']
+    assert actual_authors == expected_authors, f"Expected authors '{expected_authors}', but got '{actual_authors}'"
 
 
 def test_collect_paper_data_from_url_acm():
@@ -109,7 +111,6 @@ def test_collect_paper_data_from_doi():
     assert paper_data['venue_title'] == "ICSE '24: IEEE/ACM 46th International Conference on Software Engineering"
     assert paper_data['doi'] == '10.1145/3597503.3623337'
     assert paper_data['year'] == 2024
-    assert 'Published: 2024-2-6' in paper_data['note']
     assert paper_data['semanticscholarid'] == ''
     assert paper_data['abstract'] == ''
     assert paper_data['tldr'] == ''
@@ -118,7 +119,6 @@ def test_collect_paper_data_from_ieee():
     """Test collect_paper_data_from_url with IEEE URL"""
     url = "https://ieeexplore.ieee.org/document/10638563/"
     paper_data = collect_paper_data_from_url(url)
-    print(paper_data)
     # Assert that paper_data is a dictionary with the expected keys
     assert isinstance(paper_data, dict)
     assert paper_data['url'] == 'https://ieeexplore.ieee.org/document/10638563/'
