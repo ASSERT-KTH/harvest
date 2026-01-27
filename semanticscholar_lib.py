@@ -129,8 +129,9 @@ def get_embedding(title, output_dir='/home/martin/workspace/scholar-harvest/cach
         semanticscholarid = resp["data"][0]["paperId"]
         
         semanticscholarfull = get_embedding_from_paper_id(semanticscholarid,delay)
+        
         # Respect rate limits
-        print("grace delay for semanticscholar embedding call for ", title, file=sys.stderr)
+        # print("grace delay for semanticscholar embedding call for ", title, file=sys.stderr)
         time.sleep(delay)
         
         # Add the URL for reference
@@ -229,7 +230,8 @@ def get_semantic_scholar_id_from_title(title):
     semanticscholar = requests.get(url, headers={"x-api-key": config.semanticscholar_key})
     time.sleep(SEMANTICSCHOLAR_DELAY)
     # print(semanticscholar.text)
-    semanticscholar.raise_for_status()
+    if semanticscholar.status_code != 200:
+        return None
     orig_data = semanticscholar.json()
     if "data" in orig_data:
         # simplifying the happy path

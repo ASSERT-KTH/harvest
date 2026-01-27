@@ -16,6 +16,9 @@ title = sys.argv[1]
 
 paper_id = semanticscholar_lib.get_semantic_scholar_id_from_title(title)
 
+if not paper_id:
+    print("paper not found on semanticscholar:", title)
+    sys.exit(1)
 
 # also push to pine cone
 get_embedding_semanticscholar.download_and_save(title)

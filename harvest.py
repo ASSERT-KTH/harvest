@@ -482,7 +482,7 @@ def transform_zotero_to_output(zotero_input):
     output = {
         'url': url,
         'title': item.get('title', ''),
-        'semanticscholarid': '0092ce9c83a4c033fa69a6225f8a542566915006',  # This seems to be a fixed value in the example
+        'semanticscholarid': '',
         'abstract': f"  {abstract}" if abstract else '',
         'tldr': tldr,
         'authors': authors_str,
@@ -707,13 +707,7 @@ def create_harvest_email_paper(paper, service, **kwargs):
     
     # logging cases where no metadata is available
     if not paper_data or paper_data["title"] == None or paper_data["title"] == "":
-        parsed_url = urlparse(paper.url)
-        domain = parsed_url.netloc
-        log_entry = {"domain": domain, "url": paper.url}
-        log_file_path = "cache/domains-no-api.support.jsonl"
-        os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
-        with open(log_file_path, "a") as f:
-            f.write(json.dumps(log_entry) + "\n")
+        log_problem_cases(paper.url)
         print("no API metadata available for "+paper.url)
         # we return so we don't mark as seen
         # and we'll see it again later
@@ -749,15 +743,28 @@ def create_harvest_email_paper(paper, service, **kwargs):
     # now handle by collect_paper_data_from_url_with_cache above
     # record_paper_as_seen(paper)
 
+    # store the novel papers in cache/toread
+
     ### now, send notifications via appropriate channel
     # notify if high reputation only   
     if is_high_reputation(paper.url):
-        notify_email(paper, service)
+        fname = path_on_disk_internal_v2(paper.desc, "/home/martin/workspace/scholar-harvest/cache/toread/")
+        os.makedirs(os.path.dirname(fname), exist_ok=True)
+        with open(fname, "w") as f:
+            f.write(paper.as_json())
     else: 
-        print("no reputation for "+origin_url+" not sending notification")   
+        log_problem_cases(paper.url, log_file_path="cache/domains-no-reputation.jsonl")  
 
 
     return True
+
+def log_problem_cases(url, log_file_path="cache/domains-no-api.support.jsonl"):
+    parsed_url = urlparse(url)
+    domain = parsed_url.netloc
+    log_entry = {"domain": domain, "url": url}
+    os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
+    with open(log_file_path, "a") as f:
+        f.write(json.dumps(log_entry) + "\n")
 
 def is_high_reputation(url):
     """
@@ -2468,14 +2475,6 @@ def setup_categories():
             }).execute()            
             categories[label['name']]["labelId"] = label['id']
 
-def main():
-    global READING_NOTES
-    READING_NOTES=open("/home/martin/workspace/related-work-github/ASSERT-KTH-related-work/allall.md").read().lower()
-    setup_categories()
-    classify_scholarnotifications()
-    classify_planetse()
-    classify_semanticscholar()
-
 def get_creds():
     store = file.Storage(os.path.dirname(__file__)+'/token.json')
     creds = store.get()
@@ -2817,6 +2816,61 @@ def collect_and_send_email(url):
     # Check if high reputation and send notification
     notify_email(paper, service)
     
+def backtrack_to_get_missing_embeddings():
+    """
+    Backtrack through the cache/harvest directory to find papers missing embeddings and compute them.
+
+    python -c "import harvest; harvest.backtrack_to_get_missing_embeddings()"
+    """
+    # Get all files in cache/harvest
+    harvest_files = glob.glob("/home/martin/workspace/scholar-harvest/cache/harvest/*.json")
+    print(f"Found {len(harvest_files)} files in cache/harvest")
+    
+    withembedding = 0
+    missingembedding = 0
+    skipped = 0
+    errors = 0
+    
+    # Get the 1000 most recent files by modification time
+    harvest_files = sorted(harvest_files, key=os.path.getmtime, reverse=True)[:1000]
+    print(f"Processing the 1000 most recent files")
+    
+    for filepath in harvest_files:
+        try:
+            with open(filepath, "r") as f:
+                paper_data = json.load(f)
+            
+            # Check if embedding already exists
+            title = paper_data.get("title")
+            if not title:
+                skipped += 1
+                continue
+                
+            # Try to get/compute embedding
+            embedding_result = get_embedding_and_push_to_db(title)
+            
+            if embedding_result and embedding_result.get("embedding"):
+                withembedding += 1
+                if withembedding % 10 == 0:
+                    print(f"Processed {withembedding} papers with embeddings, {missingembedding} missing...")
+            else:
+                missingembedding += 1
+                
+        except Exception as e:
+            errors += 1
+            print(f"Error processing {filepath}: {e}")
+    
+    print(f"\nBacktracking complete:")
+    print(f"  Skipped: {skipped}")
+    print(f"  Errors: {errors}")
+
+def main():
+    global READING_NOTES
+    READING_NOTES=open("/home/martin/workspace/related-work-github/ASSERT-KTH-related-work/allall.md").read().lower()
+    setup_categories()
+    classify_scholarnotifications()
+    classify_planetse()
+    classify_semanticscholar()
 
 if __name__ == '__main__':
     main()
