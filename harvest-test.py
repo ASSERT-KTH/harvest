@@ -2,6 +2,8 @@
 # test for harvest
 
 from harvest import *
+import pytest
+import sys
 
 
 # test collect_paper_data_from_url
@@ -193,7 +195,8 @@ def main():
     test_collect_paper_data_from_url()
     test_get_zotero_translator_service_url()
     test_collect_paper_data_from_doi()
+
     print("All tests passed!")
 
 if __name__ == "__main__":
-    main()
+    sys.exit(pytest.main([__file__]))

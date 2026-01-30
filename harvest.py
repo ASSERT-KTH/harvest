@@ -1612,7 +1612,13 @@ def collect_paper_data_from_url(url):
     if "link.springer.com" in url:
         # example url-analysis.py http://link.springer.com/10.1007/s11219-025-09709-4
         components = [x for x in url.split("/") if len(x)>0]
+
+        # default
         doi = components[-2]+"/"+components[-1]
+
+        # example https://link.springer.com/content/pdf/10.1007/s10664-020-09920-w.pdf
+        if components[-1].endswith(".pdf"):
+            doi = components[-2]+"/"+components[-1][0:-4]
         # https://dev.springernature.com/
         # https://dev.springernature.com/docs/api-endpoints/metadata-api/
         # GET https://api.springernature.com/meta/v2/json?api_key=YOUR_API_KEY&q=doi:YOUR_DOI
@@ -2865,12 +2871,15 @@ def backtrack_to_get_missing_embeddings():
     print(f"  Errors: {errors}")
 
 def main():
+    pinecone_before = embed.total_number_entries_in_pinecone_index('se-semanticscholar')
     global READING_NOTES
     READING_NOTES=open("/home/martin/workspace/related-work-github/ASSERT-KTH-related-work/allall.md").read().lower()
     setup_categories()
     classify_scholarnotifications()
     classify_planetse()
     classify_semanticscholar()
+    pinecone_after = embed.total_number_entries_in_pinecone_index('se-semanticscholar')
+    print(f"Pinecone entries before: {pinecone_before}, after: {pinecone_after}, added: {pinecone_after - pinecone_before}")
 
 if __name__ == '__main__':
     main()

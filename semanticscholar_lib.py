@@ -45,6 +45,10 @@ def get_semantic_scholar_tldr_embedding(semanticscholarid):
 def get_embedding_and_push_to_db(title, output_dir='/home/martin/workspace/scholar-harvest/cache/embedding.specter_v2/', verbose=False, delay=1.0):
     result = get_embedding(title, output_dir, verbose, delay)
     # print(result)
+
+    if result and "cached" in result and result["cached"] == True:
+        return result
+    
     if result and "embedding" in result and result["embedding"] and "vector" in result["embedding"]:
         embed.push_single_entry_to_pinecone("se-semanticscholar", result)
     return result
