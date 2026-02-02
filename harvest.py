@@ -32,6 +32,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import random
 import glob
+import subprocess
 
 from harvest_lib import *
 from semanticscholar_lib import *
@@ -245,6 +246,7 @@ class Paper:
             "detection_date":self.detection_date,
             "title":self.desc,
             "category":self.category,
+            "categories":self.categories,
             "tldr":self.tldr,
             "authors":self.authors,
             "reason":self.print_reason(),
@@ -734,7 +736,7 @@ def create_harvest_email_paper(paper, service, **kwargs):
         
     paper.origin = origin
     
-    paper.categories = [x[1] for x in compute_category_embedding(paper)]
+    paper.categories = compute_categories_embedding(paper)
 
     # backward compatibility
 
@@ -769,7 +771,7 @@ def log_problem_cases(url, log_file_path="cache/domains-no-api.support.jsonl"):
 def is_high_reputation(url):
     """
     check if the paper is from a high reputation source, before sending a notification
-    discards mdpi, researchgate.net (no API)
+    discards mdpi (no API)
     """
     if not url: return False
     if "nature.com" in url: return True
@@ -780,6 +782,7 @@ def is_high_reputation(url):
     if "computer.org" in url: return True
     if "ieeexplore.ieee.org" in url: return True
     if "dl.acm.org" in url: return True
+    if "researchgate.net" in url: return True
 
     # main publishers
     if "link.springer.com" in url: return True
@@ -944,6 +947,136 @@ def info_from_crossref(doi):
     }
     
     return formatted_output
+
+def collect_paper_from_researchgate(url):
+    """
+    Extracts paper metadata from ResearchGate URLs.
+    Normalizes the URL to the publication page, attempts to scrape metadata, 
+    and falls back to Semantic Scholar search based on the title extracted from the URL.
+
+    It does not work because researchgate returns HTTP 403
+
+    python -c "import harvest; data=harvest.collect_paper_from_researchgate('https://www.researchgate.net/profile/Karthigayan-Devan/publication/399646746_ARCHITECTING_SCALABLE_CLOUD_NATIVE_DATA_INFRASTRUCTURE_FOR_REAL_TIME_CREDIT_REPORTING_AND_FINANCIAL_INCLUSION_A_ZERO_DOWNTIME_MULTI_CLOUD_RELIABILITY_FRAME_WORK/links/69627e535cc49c35ce7b1ea6/ARCHITECTING-SCALABLE-CLOUD-NATIVE-DATA-INFRASTRUCTURE-FOR-REAL-TIME-CREDIT-REPORTING-AND-FINANCIAL-INCLUSION-A-ZERO-DOWNTIME-MULTI-CLOUD-RELIABILITY-FRAME-WORK.pdf'); print(data)"
+    """
+    # Normalize URL to publication page
+    pub_url = url
+    if "/publication/" in url:
+        # Extract the publication part: ID_Title
+        match = re.search(r'/publication/(\d+_[^/]+)', url)
+        if match:
+            publication_part = match.group(1)
+            pub_url = "https://www.researchgate.net/publication/" + publication_part
+
+    # Try to fetch HTML and extract meta tags (though Cloudflare often blocks)
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Referer': 'https://www.google.com/'
+    }
+    
+    title = None
+    authors = ""
+    abstract = ""
+    venue_title = "ResearchGate"
+    doi = None
+    year = None
+    semanticscholarid = ""
+    tldr = ""
+
+    # print(pub_url)
+    command = ['curl-cffi-cli.py']
+    for key, value in headers.items():
+        command.extend(['-H', f'{key}: {value}'])
+    command.extend(['-L', pub_url])
+    # command.extend(['--timeout', '10'])
+
+    result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+    if result.returncode != 0:
+        raise requests.exceptions.HTTPError(f"curl-cffi-cli failed: {result.stderr}")
+    resp_text = result.stdout
+    resp_status_code = 200  # assuming success
+
+    # Create a mock response object to maintain compatibility
+    class MockResp:
+        def __init__(self, text, status_code):
+            self.text = text
+            self.status_code = status_code
+        def raise_for_status(self):
+            if self.status_code != 200:
+                raise requests.exceptions.HTTPError(f"HTTP {self.status_code}")
+
+    resp = MockResp(resp_text, resp_status_code)
+    resp.raise_for_status()
+    # print("ResearchGate response status:", resp.status_code)
+    if resp.status_code == 200:
+        tree = etree.HTML(resp.text)
+        
+        # Title
+        meta_title = tree.xpath('//meta[@property="citation_title"]/@content')
+        if meta_title:
+            title = meta_title[0]
+        else:
+            meta_title = tree.xpath('//meta[@property="og:title"]/@content')
+            if meta_title:
+                title = meta_title[0].replace("(PDF) ", "")
+        
+        # Authors
+        meta_authors = tree.xpath('//meta[@property="citation_author"]/@content')
+        if meta_authors:
+            authors = ", ".join(meta_authors)
+
+        # Abstract
+        meta_desc = tree.xpath('//meta[@property="og:description"]/@content')
+        if meta_desc:
+            abstract = meta_desc[0]
+            # Cleanup "PDF | ... | Find, read and cite ..."
+            if abstract.startswith("PDF | "):
+                abstract = abstract[6:]
+            if " | Find, read and cite" in abstract:
+                abstract = abstract.split(" | Find, read and cite")[0]
+
+        # Venue
+        meta_journal = tree.xpath('//meta[@property="citation_journal_title"]/@content')
+        if meta_journal:
+            venue_title = meta_journal[0]
+        else:
+            meta_conf = tree.xpath('//meta[@property="citation_conference_title"]/@content')
+            if meta_conf:
+                venue_title = meta_conf[0]
+
+        # Year
+        meta_date = tree.xpath('//meta[@property="citation_publication_date"]/@content')
+        if meta_date:
+            match = re.search(r'(\d{4})', meta_date[0])
+            if match:
+                year = int(match.group(1))
+
+        # DOI
+        meta_doi = tree.xpath('//meta[@property="citation_doi"]/@content')
+        if meta_doi:
+            doi = meta_doi[0]
+        else:
+             meta_dc_id = tree.xpath('//meta[@property="DC.identifier"]/@content')
+             for item in meta_dc_id:
+                 if "doi.org" in item and len(item) > 20: # simple check to avoid empty http://dx.doi.org/
+                     doi = item.replace("http://dx.doi.org/", "").replace("https://doi.org/", "")
+
+    if title:
+        return {
+            "url": pub_url,
+            "title": title,
+            "semanticscholarid": "",
+            "abstract": abstract,
+            "tldr": "",
+            "authors": authors,
+            "venue_title": venue_title,
+            "doi": doi,
+            "year": year,
+            "note": "ResearchGate"
+        }
+    
+    return None
 
 def collect_paper_data_from_arxiv(url):
     try:
@@ -1553,6 +1686,8 @@ def collect_paper_data_from_url(url):
     doi=None
     abstract = None
     note = None
+    year = None
+
     if "doi.org/" in url:
         doi = url.replace("https://dx.doi.org/","").replace("https://doi.org/","").replace("http://doi.org/","")
         try:
@@ -1576,6 +1711,9 @@ def collect_paper_data_from_url(url):
     if "diva-portal.org/" in url:    
         ## https://www.monperrus.net/martin/arxiv-json.py?id=2304.12015
         return collect_paper_data_from_diva(url)
+    
+    if "researchgate.net/" in url:
+        return collect_paper_from_researchgate(url)
     
     if "dblp.org/" in url:
         return collect_paper_data_from_dblp(url)
@@ -1632,6 +1770,7 @@ def collect_paper_data_from_url(url):
             title=paper_data["title"]
             author_list = [x["creator"] for x in paper_data["creators"]]
             authors = " | ".join(author_list)
+            year = paper_data.get("onlineDate","")[0:4]
         else: print("no records found in Springer "+url)
 
         # print(springer_data)
@@ -1741,6 +1880,9 @@ def collect_paper_data_from_url(url):
     if "openreview.net/" in url:
         return collect_paper_data_from_openreview(url)
 
+    if "preprints.org/" in url:
+        return collect_paper_data_from_preprints_org(url)
+
     if title == None:
         # default from Zotero Translation Server
         zotero_data = get_zotero_translator_service_url(url)
@@ -1757,6 +1899,7 @@ def collect_paper_data_from_url(url):
         "author_list": author_list,
         "venue_title" : venue_title,
         "doi" : doi,
+        "year" : year,
         "note" : note
     }
 
@@ -1844,6 +1987,108 @@ def collect_paper_data_from_mdpi(url):
         "note": note
     }
     
+def collect_paper_data_from_preprints_org(url):
+    """
+    Extract paper metadata from Preprints.org URLs.
+    
+    Args:
+        url (str): URL of the Preprints.org paper (e.g., https://www.preprints.org/manuscript/202401.1234/v1)
+    
+    Returns:
+        dict: Paper metadata including title, authors, abstract, doi, etc.
+        
+    Example:
+        python -c "import harvest; print(harvest.collect_paper_data_from_preprints_org('https://www.preprints.org/manuscript/202401.1234/v1'))"
+    """
+    title = None
+    authors = ""
+    author_list = None
+    semanticscholarid = ""
+    tldr = ""
+    venue_title = "Preprints.org"
+    doi = None
+    abstract = None
+    note = None
+    year = None
+    
+    try:
+        # Extract manuscript ID from URL
+        # URL format: https://www.preprints.org/manuscript/YYYYMM.ID/vN
+        # or: https://www.preprints.org/manuscript/YYYYMM.ID
+        import re
+        manuscript_pattern = r'/manuscript/([0-9]+\.[0-9]+)'
+        match = re.search(manuscript_pattern, url)
+        
+        if match:
+            manuscript_id = match.group(1)
+            # Extract year from manuscript ID (first 4 digits)
+            year_match = re.match(r'(\d{4})', manuscript_id)
+            if year_match:
+                year = int(year_match.group(1))
+            
+            # Try to get metadata from the page
+            response = requests.get(url, timeout=10, headers ={"User-Agent": "Mozilla/5.0"})
+            if response.status_code == 200:
+                html_content = response.text
+                html_root = etree.HTML(html_content)
+                
+                # Try to extract title from meta tags
+                title_meta = html_root.xpath('//meta[@name="citation_title"]/@content')
+                if title_meta:
+                    title = title_meta[0]
+                
+                # Try to extract authors from meta tags
+                author_metas = html_root.xpath('//meta[@name="citation_author"]/@content')
+                if author_metas:
+                    author_list = author_metas
+                    authors = " | ".join(author_metas)
+                
+                # Try to extract abstract from meta tags
+                abstract_meta = html_root.xpath('//meta[@name="citation_abstract"]/@content')
+                if abstract_meta:
+                    abstract = abstract_meta[0]
+                elif html_root.xpath('//meta[@name="description"]/@content'):
+                    abstract = html_root.xpath('//meta[@name="description"]/@content')[0]
+                
+                # Try to extract DOI from meta tags
+                doi_meta = html_root.xpath('//meta[@name="citation_doi"]/@content')
+                if doi_meta:
+                    doi = doi_meta[0]
+                
+                # Try to extract publication date/year
+                date_meta = html_root.xpath('//meta[@name="citation_publication_date"]/@content')
+                if date_meta and not year:
+                    date_str = date_meta[0]
+                    year_match = re.match(r'(\d{4})', date_str)
+                    if year_match:
+                        year = int(year_match[0])
+                
+                # If no meta tags, try to parse from page content
+                if not title:
+                    title_elem = html_root.xpath('//h1[@class="article-title"]')
+                    if title_elem:
+                        title = title_elem[0].text_content().strip()
+                
+                note = f"preprints.org manuscript: {manuscript_id}"
+            else:
+                print(f"Failed to retrieve Preprints.org page: {response.status_code}")
+    except Exception as e:
+        print(f"Error extracting Preprints.org metadata from {url}: {e}")
+    
+    return {
+        "url": url,
+        "title": title,
+        "semanticscholarid": semanticscholarid,
+        "abstract": abstract,
+        "tldr": tldr,
+        "authors": authors,
+        "author_list": author_list,
+        "venue_title": venue_title,
+        "doi": doi,
+        "year": year,
+        "note": note
+    }
+
 def collect_paper_data_from_dblp(url):
     try:
         # https://dblp.org/rec/conf/icst/AlshammariAHB24.xml
@@ -2230,27 +2475,112 @@ def get_labelId(category):
         return get_labelId(category)
     return label 
 
-def compute_category_embedding_test():
+def compute_categories_embedding_test():
     """
     For the 20 most recent papers in cache/harvest, compute the category based on embedding similarity
-    python -c "import harvest; harvest.compute_category_embedding_test()"
+    python -c "import harvest; harvest.compute_categories_embedding_test()"
     """
-    paths = sorted(glob.glob("cache/harvest/*"), key=os.path.getmtime, reverse=True)[:50]
+    paths = sorted(glob.glob("cache/toread/*"), key=os.path.getmtime, reverse=True)[:50]
     for path in paths:
         with open(path, "r") as f:
             paper_data = json.load(f)
             paper = Paper(paper_data["url"], paper_data["title"])
-            categories = compute_category_embedding(paper)
+            categories = compute_categories_embedding(paper)
             if len(categories) > 0:
                 print(paper.desc)
                 print("categories:", categories)
                 print()
 
-def compute_category_embedding(paper):
+
+_overleaf_mapping_cache = None
+
+def get_mapping_to_overleaf(title):
+    """
+    returns case insensitive reverse mapping from cache/overleaf_citations.json
+    
+    Returns the paper_id(s) from overleaf_citations.json where the given title 
+    appears either as a main paper or as a citation.
+    
+    Args:
+        title (str): The paper title to search for (case insensitive)
+        
+    Returns:
+        list: List of paper_ids where this title appears, or empty list if not found
+    """
+    global _overleaf_mapping_cache
+    
+    # Load and cache the mapping on first access
+    if _overleaf_mapping_cache is None:
+        _overleaf_mapping_cache = {}
+        mapping_path = "cache/overleaf_citations.json"
+        if os.path.exists(mapping_path):
+            try:
+                with open(mapping_path, "r") as f:
+                    data = json.load(f)
+                    
+                # Build reverse mapping: normalized_title -> [paper_ids]
+                for paper_id, entry in data.items():
+                    # Index the main paper title
+                    if "metadata" in entry and "title" in entry["metadata"]:
+                        main_title = entry["metadata"]["title"]
+                        if main_title:
+                            normalized = normalize_title(main_title.replace("\\\\", "").strip().lower())
+                            if normalized not in _overleaf_mapping_cache:
+                                _overleaf_mapping_cache[normalized] = []
+                            _overleaf_mapping_cache[normalized].append(main_title)
+                        else: continue
+                    
+                    # Index all citations
+                    if "citations" in entry:
+                        for cited_title in entry.get("citations", []):
+                            if cited_title:
+                                normalized = normalize_title(cited_title.replace("\\\\", "").strip().lower())
+                                if normalized not in _overleaf_mapping_cache:
+                                    _overleaf_mapping_cache[normalized] = []
+                                if main_title and main_title not in _overleaf_mapping_cache[normalized]:
+                                    _overleaf_mapping_cache[normalized].append(main_title)
+            except Exception as e:
+                print(f"Error loading overleaf_citations.json: {e}")
+                _overleaf_mapping_cache = {}
+    
+    # Look up the normalized title
+    normalized_title = normalize_title(title.lower())
+    return _overleaf_mapping_cache.get(normalized_title, [])
+
+def compute_categories_embedding_test2():
+    """
+    For the 20 most recent papers in cache/harvest, compute the category based on embedding similarity
+    python -c "import harvest; harvest.compute_categories_embedding_test()"
+    """
+    paths = sorted(glob.glob("cache/toread/*"), key=os.path.getmtime, reverse=True)[:50]
+    for path in paths:
+        with open(path, "r") as f:
+            paper_data = json.load(f)
+        paper = Paper(paper_data["url"], paper_data["title"])
+
+        embedding_result = get_embedding_and_push_to_db(paper.desc)
+        if not embedding_result or not embedding_result.get("embedding") or not embedding_result["embedding"].get("vector"):
+            continue
+
+        vector = embedding_result["embedding"]["vector"]
+        for x in rrs.search_in_pinecone_semanticscholar(paper.desc, vector, 5):
+            print(x["title"])
+            categories = get_mapping_to_overleaf(x.get("title",""))
+            print(categories)
+            if len(categories) > 0:
+                for x in categories:
+                    if x not in paper_data.get("categories", []):
+                        paper_data.setdefault("categories", []).append(x)
+                with open(path, "w") as f:
+                    json.dump(paper_data, f, indent=2)
+                    print(f"Updated {path}")
+
+                
+def compute_categories_embedding(paper):
     """
     Compute the category based on the 5 nearest neighbors in embedding space
 
-    python -c "import harvest; p=harvest.Paper('url','Testing machine learning based systems: a systematic mapping'); print(harvest.compute_category_embedding(p))"
+    python -c "import harvest; p=harvest.Paper('url','Testing machine learning based systems: a systematic mapping'); print(harvest.compute_categories_embedding(p))"
     """
     # Get embedding for the paper
     embedding_result = get_embedding_and_push_to_db(paper.desc)
@@ -2285,6 +2615,8 @@ _topic_mapping_cache = None
 
 def compute_category_based_past_classification(paper):
     """
+    link_to_topic_mapping.json is written by /home/martin/workspace/scholar-harvest/dl_related_work.py
+
         in cache/link_to_topic_mapping.json title=>category
         {
     "online loans for software": "related_work_on_property-based_testing_for_program_repair__papers_tools.md",
@@ -2780,7 +3112,7 @@ python -c "import harvest; harvest.compute_stats_missing_metadata()"
         print(f"{domain}: {count}")
 
 def transfer_data_from_dict_to_paper(paper, paper_data):
-    paper.url = paper_data["url"] if "url" in paper_data and len(paper_data["url"]) > 0 else paper.url
+    paper.url = paper_data["url"] if "url" in paper_data and paper_data["url"] and len(paper_data["url"]) > 0 else paper.url
     # OOPS for historical reasons paper.desc is title
     paper.desc = paper_data["title"] if "title" in paper_data and len(paper_data["title"]) > 0 else paper.desc
     if "author_list" in paper_data and paper_data["author_list"]:
@@ -2821,6 +3153,76 @@ def collect_and_send_email(url):
     
     # Check if high reputation and send notification
     notify_email(paper, service)
+
+def notify_for_all_categorized_papersto_read():
+    """
+    Read all papers in cache/toread, send email notifications for categorized ones,
+    remove them from toread, and mark them as already_notified.
+    
+    python -c "import harvest; harvest.notify_for_all_categorized_papersto_read()"
+    """
+    # Set up Gmail service
+    service = build('gmail', 'v1', http=get_creds().authorize(Http()))
+    
+    toread_dir = "/home/martin/workspace/scholar-harvest/cache/toread/"
+    already_notified_dir = "/home/martin/workspace/scholar-harvest/cache/already_notified/"
+    
+    # Get all files in toread
+    toread_files = glob.glob(toread_dir + "*")
+    print(f"Found {len(toread_files)} papers in toread")
+    
+    categorized_count = 0
+    uncategorized_count = 0
+    error_count = 0
+    
+    for filepath in toread_files:
+        try:
+            # Load paper data from file
+            with open(filepath, "r") as f:
+                paper_data = json.load(f)
+            
+            # Create Paper object and restore data
+            paper = Paper(paper_data.get("url", ""), paper_data.get("title", ""))
+            transfer_data_from_dict_to_paper(paper, paper_data)
+            
+            # Check if paper has reason (needed for categorization)
+            if "reason" in paper_data:
+                paper.reason = paper_data["reason"].split(", ") if isinstance(paper_data["reason"], str) else paper_data["reason"]
+            
+            # Classify the paper
+            paper.categories = paper_data.get("categories", [])
+            paper.category = paper.categories[0] if paper.categories else "uncategorized"
+            
+            # Only notify if categorized (not "uncategorized")
+            if paper.category != "uncategorized" and len(paper.categories) > 0:
+                categorized_count += 1
+                
+                # Send email notification
+                notify_email(paper, service)
+                
+                # Create path for already_notified
+                notified_path = path_on_disk_internal_v2(paper.desc, already_notified_dir)
+                os.makedirs(os.path.dirname(notified_path), exist_ok=True)
+                
+                # Move/copy file to already_notified
+                with open(notified_path, "w") as f:
+                    f.write(paper.as_json())
+                
+                # Remove from toread
+                os.remove(filepath)
+                
+                print(f"Notified: {paper.desc[:60]}... [{paper.category}]")
+            else:
+                uncategorized_count += 1
+                
+        except Exception as e:
+            error_count += 1
+            print(f"Error processing {filepath}: {e}")
+    
+    print(f"\nProcessing complete:")
+    print(f"  Categorized and notified: {categorized_count}")
+    print(f"  Uncategorized (skipped): {uncategorized_count}")
+    print(f"  Errors: {error_count}")
     
 def backtrack_to_get_missing_embeddings():
     """

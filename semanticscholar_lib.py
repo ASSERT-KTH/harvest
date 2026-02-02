@@ -183,6 +183,7 @@ def get_embedding_from_paper_id(semanticscholarid, delay=SEMANTICSCHOLAR_DELAY):
     # Get embeddings
     url = f"https://api.semanticscholar.org/graph/v1/paper/{semanticscholarid}?fields=authors,title,tldr,citationCount,embedding,embedding.specter_v2"
     resp = requests.get(url, headers={"x-api-key": config.semanticscholar_key})
+    
     semanticscholarfull = resp.json()
 
     if 'authors' in semanticscholarfull and isinstance(semanticscholarfull['authors'], list):
@@ -430,6 +431,8 @@ def get_citing_papers(paper_id, verbose=False):
     cache_file = os.path.join(cache_dir, f"{safe_paper_id}.json")
 
     if os.path.exists(cache_file):
+        cache_age_days = (time.time() - os.path.getmtime(cache_file)) / (24 * 60 * 60)
+        print(f"Loading cached citing papers for paper ID: {paper_id} (cached {cache_age_days:.1f} days ago)")
         # Check if cache is older than 3 weeks
         file_time = os.path.getmtime(cache_file)
         current_time = time.time()
