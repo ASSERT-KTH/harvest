@@ -1866,6 +1866,7 @@ def collect_paper_data_from_url(url):
                 abstract = ieeedata["articles"][0]["abstract"] if "abstract" in  ieeedata["articles"][0] else ""
                 # print ([x for x in ieeedata["articles"][0]["authors"]["authors"]])
                 # args the ["authors"]["authors"], bad data model
+                author_list = [x["full_name"] for x in ieeedata["articles"][0]["authors"]["authors"]]
                 authors = ", ".join([x["full_name"] for x in ieeedata["articles"][0]["authors"]["authors"]])
                 title = ieeedata["articles"][0]["title"]                
                 # semanticscholarid="doi:"+doi
