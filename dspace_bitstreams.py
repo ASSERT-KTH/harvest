@@ -35,7 +35,8 @@ def process_bitstream_url_dspace_7(download_url):
     # Get metadata about the bitstream using DSpace REST API
     # DSpace 7+ uses /api/core/bitstreams/{uuid}
     metadata_url = f"{base_url}/server/api/core/bitstreams/{bitstream_id}"
-    metadata_response = requests.get(metadata_url)
+    # print(f"Fetching DSpace 7+ metadata from: {metadata_url}")
+    metadata_response = requests.get(metadata_url, headers={"User-Agent": "Mozilla/5.0"}, allow_redirects=True)
 
     if metadata_response.status_code == 200:
         metadata = metadata_response.json()
@@ -46,12 +47,12 @@ def process_bitstream_url_dspace_7(download_url):
             # Make the request to download the bundle
             if bundle_link:
                 # print(f"Downloading bundle from: {bundle_link}")
-                bundle_response = requests.get(bundle_link, allow_redirects=True)
+                bundle_response = requests.get(bundle_link, headers={"User-Agent": "Mozilla/5.0"}, allow_redirects=True)
 
                 if bundle_response.status_code == 200:
                     # print(bundle_response.json())
                     item_link = bundle_response.json().get('_links', {}).get('item', {}).get('href')
-                    item_response = requests.get(item_link, allow_redirects=True)
+                    item_response = requests.get(item_link, headers={"User-Agent": "Mozilla/5.0"}, allow_redirects=True)
 
                     if item_response.status_code == 200:
                         return item_response.json()
@@ -65,6 +66,7 @@ def process_bitstream_url_dspace_7(download_url):
             print("Bundle link not found in metadata")
     else:
         print(f"\nDSpace Metadata not available (Status: {metadata_response.status_code})")
+        print(metadata_response.text)
 
 def dspace_metadata_to_json(data):
     """

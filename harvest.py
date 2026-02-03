@@ -761,6 +761,8 @@ def create_harvest_email_paper(paper, service, **kwargs):
     return True
 
 def log_problem_cases(url, log_file_path="cache/domains-no-api.support.jsonl"):
+    if "researchgate.net" in url:
+        return
     parsed_url = urlparse(url)
     domain = parsed_url.netloc
     log_entry = {"domain": domain, "url": url}
@@ -782,7 +784,7 @@ def is_high_reputation(url):
     if "computer.org" in url: return True
     if "ieeexplore.ieee.org" in url: return True
     if "dl.acm.org" in url: return True
-    if "researchgate.net" in url: return True
+    if "researchgate.net" in url: return False
 
     # main publishers
     if "link.springer.com" in url: return True
@@ -828,12 +830,7 @@ def collect_paper_data_from_url_with_cache(url):
             domain = urlparse(url).netloc or url
             return None
         except Exception:
-            domain = url
-            log_path = "cache/domains-no-api.support.jsonl"
-            os.makedirs(os.path.dirname(log_path), exist_ok=True)
-            with open(log_path, "a") as f:
-                f.write(json.dumps({"url": url, "domain": domain}) + "\n")
-            return None
+            log_problem_cases(url, log_file_path="cache/domains-no-api.support.jsonl")
     if "doi" in data and data["doi"]:
         data["doi"] = data["doi"].lower().replace("https://doi.org/","").replace("http://doi.org/","")
     if data:
