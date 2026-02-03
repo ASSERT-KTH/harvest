@@ -1,0 +1,145 @@
+#!/usr/bin/python
+"""
+Find new related work (missing references) based on a list of papers in a GitHub issue.
+
+This script analyzes the papers listed in a given GitHub issue URL to discover potentially 
+missed related work. It employs two primary methods for discovery:
+1. Citation Graph Analysis: Identifies papers that frequently cite the papers listed in the issue.
+2. Embedding Space Similarity: Uses vector embeddings to find papers that are semantically 
+   similar to those listed in the issue.
+
+The script filters out papers that are already mentioned in the issue content to suggest 
+only new, relevant additions.
+
+Usage:
+    python find_new_rw.py <issue_url>
+
+Example:
+    python find_new_rw.py https://github.com/ASSERT-KTH/related-work/issues/67
+
+This is a successor to and new implementation of previous tools like bibassist.py 
+and missingreferences.py.
+"""
+
+
+
+
+import harvest_lib
+import harvest
+import semanticscholar_lib  
+import sys
+import re
+import embed
+import issues_to_readme
+import traceback
+import collections
+
+def extract_urls(content):
+    
+    # Regex pattern to match URLs
+    url_pattern = r'https?://[^\s\)\]\>"\'<,]+'
+    
+    # Find all URLs
+    urls = re.findall(url_pattern, content)
+    
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_urls = []
+    for url in urls:
+        url = harvest_lib.unredirect(url)
+        if url not in seen:
+            seen.add(url)
+            unique_urls.append(url)
+    
+    return unique_urls
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python find_new_rw.py <issue_url>")
+        print("Example: python find_new_rw.py https://github.com/ASSERT-KTH/related-work/issues/92")
+        sys.exit(1)
+    content = issues_to_readme.single_issue_to_markdown_with_cache(sys.argv[1])
+
+    print(content[:200])
+    urls = extract_urls(content)
+    # print(urls)
+
+    incorrect_titles = []
+
+    paperIds = set()
+
+    for url in urls:
+        paperId = None
+        try:
+            data = harvest.collect_paper_data_from_url_with_cache(url)
+            if data and "doi" in data and data["doi"] and len(data["doi"])>0:
+                paperId = semanticscholar_lib.get_semantic_scholar_id_from_url(data["doi"], prefix="DOI:")
+            elif "arxiv.org" in url:
+                paperId = semanticscholar_lib.get_semantic_scholar_id_from_url(url, prefix="URL:")
+            elif data and "semanticscholarid" in data and len(data["semanticscholarid"])>0 and "arxiv.org" not in url:
+                paperId = data["semanticscholarid"] 
+            elif data and "title" in data and len(data["title"])>0:
+                ssdata = semanticscholar_lib.get_semantic_scholar_id_from_title(data["title"])
+                if ssdata:
+                    paperId = ssdata["paperId"]
+        except Exception as e:
+            print(f"error processing {url}: {e}")
+            traceback.print_exc()
+            continue
+
+        if paperId:
+            paperIds.add(paperId)
+
+        url2 = f"https://www.semanticscholar.org/paper/{paperId}"
+        # print(url2)
+        citing_data = harvest.collect_paper_data_from_url_with_cache(url2)
+        if citing_data:
+            if harvest_lib.normalize_title(citing_data["title"]) not in harvest_lib.normalize_title(content):
+                incorrect_titles.append((url, citing_data))
+    for (url, citing_data) in incorrect_titles:
+        print("INCORRECT TITLE",url, citing_data["title"])
+
+    # now checking for very close papers in embedding space
+    # Collect embeddings for all papers mentioned in the issue
+    paper_embeddings = {}
+    citations = collections.Counter()
+    for paperId in paperIds:
+        paper_data = semanticscholar_lib.get_embedding_from_paper_id(paperId)
+        
+        paper_embeddings[paperId] = paper_data
+        if paper_data and "embedding" in paper_data and 'title' in paper_data and paper_data["embedding"] and "vector" in paper_data["embedding"]:
+            print(f"Found embedding for {paper_data['title']} {paperId}")
+            # print(paper_data["embedding"]["vector"])
+        else:
+            print(f"No embedding found for {paperId}")
+
+        for x in semanticscholar_lib.get_citing_papers(paperId):
+            citer = semanticscholar_lib.get_paper_info_from_semantic_scholar_id(x)
+            if citer["title"].lower() in content.lower():
+                continue
+            citations[citer["title"]] += 1
+    print("\n## Missing papers from this issue (by citation graph):")
+    for title, count in citations.most_common(10):
+        print(f"{title} : {count} citations")
+
+    print("\n## Missing papers from this issue (by closeness in embedding space):")
+    embedding_suggestions = collections.Counter()
+    for paperId, paper_data in paper_embeddings.items():
+        if paper_data and "embedding" in paper_data and paper_data["embedding"] and "vector" in paper_data["embedding"]:
+            vector = paper_data["embedding"]["vector"]
+            try:
+                results = embed.search_in_pinecone_semanticscholar(paper_data.get("title", "query"), vector, top_k=10)
+                for res in results:
+                    title = res["title"]
+                    # filter out if title is already in the issue content
+                    if title.lower() in content.lower():
+                        continue
+                    embedding_suggestions[title] += 1
+            except Exception as e:
+                print(f"Error searching embedding space for {paperId}: {e}")
+
+    for title, count in embedding_suggestions.most_common(10):
+        print(f"{title} : {count}")
+
+
