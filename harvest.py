@@ -1672,6 +1672,88 @@ def collect_paper_data_from_hal(url):
 
 
 
+def collect_paper_data_from_ssrn(url):
+    """
+    Extracts paper metadata from SSRN URLs.
+    Uses wget to bypass potential Cloudflare blocks.
+    """
+    title = None
+    authors = ""
+    abstract = None
+    venue_title = "SSRN"
+    doi = None
+    year = None
+    semanticscholarid = ""
+    tldr = ""
+    note = None
+
+    user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    cmd = ["wget", "-q", "--user-agent=" + user_agent, "-O", "-", url]
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        html_content = result.stdout
+        
+        parser = etree.HTMLParser()
+        tree = etree.fromstring(html_content, parser)
+
+        # Title
+        meta_title = tree.xpath('//meta[@name="citation_title"]/@content')
+        if meta_title:
+            title = meta_title[0]
+        else:
+            h1 = tree.xpath('//h1/text()')
+            if h1: title = h1[0].strip()
+
+        # Authors
+        meta_authors = tree.xpath('//meta[@name="citation_author"]/@content')
+        if meta_authors:
+            authors = ", ".join(meta_authors)
+
+        # DOI
+        meta_doi = tree.xpath('//meta[@name="citation_doi"]/@content')
+        if meta_doi:
+            doi = meta_doi[0]
+
+        # Abstract
+        abs_div = tree.xpath('//div[@class="abstract-text"]/p')
+        if abs_div:
+            abstract = " ".join([p.xpath('string(.)').strip() for p in abs_div])
+        
+        if not abstract:
+            meta_desc = tree.xpath('//meta[@name="description"]/@content')
+            if meta_desc: abstract = meta_desc[0]
+
+        # Year
+        meta_date = tree.xpath('//meta[@name="citation_publication_date"]/@content')
+        if not meta_date:
+            meta_date = tree.xpath('//meta[@name="citation_online_date"]/@content')
+        
+        if meta_date:
+            try:
+                year = int(meta_date[0].split("/")[0])
+            except:
+                pass
+
+        if title:
+            return {
+                "url": url,
+                "title": title,
+                "semanticscholarid": semanticscholarid,
+                "abstract": abstract,
+                "tldr": tldr,
+                "authors": authors,
+                "venue_title": venue_title,
+                "doi": doi,
+                "year": year,
+                "note": note
+            }
+
+    except Exception as e:
+        print(f"Error fetching/parsing SSRN data for {url}: {e}")
+    
+    return None
+
 def collect_paper_data_from_url(url):
     """
     python -c "import harvest; print(harvest.collect_paper_data_from_url('https://doi.org/10.1145/3368089.3409733'))"
@@ -1714,6 +1796,9 @@ def collect_paper_data_from_url(url):
     
     if "researchgate.net/" in url:
         return collect_paper_from_researchgate(url)
+    
+    if "ssrn.com/" in url:
+        return collect_paper_data_from_ssrn(url)
     
     if "dblp.org/" in url:
         return collect_paper_data_from_dblp(url)
