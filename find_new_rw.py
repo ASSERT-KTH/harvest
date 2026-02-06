@@ -24,6 +24,7 @@ and missingreferences.py.
 
 
 
+import json
 import harvest_lib
 import harvest
 import semanticscholar_lib  
@@ -33,7 +34,8 @@ import embed
 import issues_to_readme
 import traceback
 import collections
-
+import os
+import overleaf_lib
 def extract_urls(content):
     
     # Regex pattern to match URLs
@@ -59,10 +61,26 @@ if __name__ == "__main__":
         print("Usage: python find_new_rw.py <issue_url>")
         print("Example: python find_new_rw.py https://github.com/ASSERT-KTH/related-work/issues/92")
         sys.exit(1)
-    content = issues_to_readme.single_issue_to_markdown_with_cache(sys.argv[1])
 
-    print(content[:200])
-    urls = extract_urls(content)
+    if sys.argv[1].startswith("https://github.com"):
+        # bit dirty to harvest_lib.normalize_title for the whole text
+        content = harvest_lib.normalize_title(issues_to_readme.single_issue_to_markdown_with_cache(sys.argv[1]))
+
+        print(content[:200])
+        urls = extract_urls(content)
+        source_text = "this issue"
+    elif os.path.isdir(sys.argv[1]):
+        source_text = "this paper"
+
+        data = overleaf_lib.extract_citations_url_from_paper_folder(sys.argv[1])
+        for k,v in dict(data).items():
+            data[harvest_lib.normalize_title(k)] = v
+        content = json.dumps(data, indent=2)
+        urls = list(data.values())
+        # print(content[:200])
+    else:
+        print("No README.md found in the folder.")
+        sys.exit(1)
     # print(urls)
 
     incorrect_titles = []
@@ -95,7 +113,7 @@ if __name__ == "__main__":
         # print(url2)
         citing_data = harvest.collect_paper_data_from_url_with_cache(url2)
         if citing_data:
-            if harvest_lib.normalize_title(citing_data["title"]) not in harvest_lib.normalize_title(content):
+            if harvest_lib.normalize_title(citing_data["title"]) not in content:
                 incorrect_titles.append((url, citing_data))
     for (url, citing_data) in incorrect_titles:
         print("INCORRECT TITLE",url, citing_data["title"])
@@ -119,11 +137,11 @@ if __name__ == "__main__":
             if citer["title"].lower() in content.lower():
                 continue
             citations[citer["title"]] += 1
-    print("\n## Missing papers from this issue (by citation graph):")
+    print(f"\n## Missing papers from {source_text} (by citation graph):")
     for title, count in citations.most_common(10):
         print(f"{title} : {count} citations")
 
-    print("\n## Missing papers from this issue (by closeness in embedding space):")
+    print(f"\n## Missing papers from {source_text} (by closeness in embedding space):")
     embedding_suggestions = collections.Counter()
     for paperId, paper_data in paper_embeddings.items():
         if paper_data and "embedding" in paper_data and paper_data["embedding"] and "vector" in paper_data["embedding"]:

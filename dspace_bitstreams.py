@@ -188,40 +188,47 @@ def process_bitstream_url_oai_pmh(download_url):
         return base_url, identifier
         
 
-    # example
-    # base_url = "https://orbilu.uni.lu/oai/request"
-    # # Identifier for the record
-    # identifier = "oai:orbilu.uni.lu:10993/66145"
-    base_url, identifier = extract_components(download_url)
-
-    # print("Base URL:", base_url)
-    # print("Identifier:", identifier)
-    params = {
-        "verb": "GetRecord",
-        "metadataPrefix": "oai_dc",    # Dublin Core format
-        "identifier": identifier
-    }
-
-    # print(f"Fetching OAI-PMH record from {base_url} with identifier {identifier}")
     try:
-        resp = requests.get(base_url, params=params, timeout=4)
-        resp.raise_for_status()
-    except (requests.exceptions.ConnectTimeout, requests.exceptions.ReadTimeout, requests.exceptions.HTTPError) as e:
-        return 
-    xml = resp.text
-    # print(xml)
+        # example
+        # base_url = "https://orbilu.uni.lu/oai/request"
+        # # Identifier for the record
+        # identifier = "oai:orbilu.uni.lu:10993/66145"
+        base_url, identifier = extract_components(download_url)
 
-    # parse XML
-    root = ET.fromstring(xml)
-    ns = {"oai": "http://www.openarchives.org/OAI/2.0/",
-        "dc": "http://purl.org/dc/elements/1.1/"}
+        # print("Base URL:", base_url)
+        # print("Identifier:", identifier)
+        params = {
+            "verb": "GetRecord",
+            "metadataPrefix": "oai_dc",    # Dublin Core format
+            "identifier": identifier
+        }
 
-    record = root.find(".//oai:record", ns)
-    if record is None:
-        raise Exception("No record found")
+        # print(f"Fetching OAI-PMH record from {base_url} with identifier {identifier}")
+        try:
+            resp = requests.get(base_url, params=params, timeout=4)
+            resp.raise_for_status()
+        except (requests.exceptions.ConnectTimeout, requests.exceptions.ReadTimeout, requests.exceptions.HTTPError) as e:
+            return 
+        xml = resp.text
+        # print(xml)
 
-    return record
-    return ET.dump(record)
+        # parse XML
+        root = ET.fromstring(xml)
+        ns = {"oai": "http://www.openarchives.org/OAI/2.0/",
+            "dc": "http://purl.org/dc/elements/1.1/"}
+
+        record = root.find(".//oai:record", ns)
+        if record is None:
+            raise Exception("No record found")
+
+        return record
+    except Exception as e:
+        if "<body>" in resp.text.lower() or "<doctype" in resp.text.lower() or "<meta http-equiv" in resp.text.lower():
+            print(f"\nSoft 404 on {base_url} (HTTP {resp.status_code})")
+            return None
+
+        print(f"Error processing DSpace OAI-PMH URL: {base_url} (HTTP {resp.status_code}) \\{resp.text}")
+        raise e
 
 
 def oai_xml_to_json(data):
@@ -354,20 +361,25 @@ def oai_xml_to_json(data):
 
 
 def main_bitstream(download_url):
-    # DSpace bitstream URL DSpace 7+
-    if "/bitstreams/" in download_url:
-        data = dspace_metadata_to_json(process_bitstream_url_dspace_7(download_url))
-        return data
+    try:
+        # DSpace bitstream URL DSpace 7+
+        if "/bitstreams/" in download_url:
+            data = dspace_metadata_to_json(process_bitstream_url_dspace_7(download_url))
+            return data
 
-    # DSpace bitstream URL DSpace 6 and earlier via OAI-PMH
-    if "/bitstream/" in download_url:
-        # python dspace_bitstreams.py https://orbilu.uni.lu/bitstream/10993/66145/1/thesis.pd
         # DSpace bitstream URL DSpace 6 and earlier via OAI-PMH
-        oai_data = process_bitstream_url_oai_pmh(download_url)
-        if oai_data is None:
-            return None
-        data = oai_xml_to_json(oai_data)
-        return data
+        if "/bitstream/" in download_url:
+            # python dspace_bitstreams.py https://orbilu.uni.lu/bitstream/10993/66145/1/thesis.pd
+            # DSpace bitstream URL DSpace 6 and earlier via OAI-PMH
+            oai_data = process_bitstream_url_oai_pmh(download_url)
+            if oai_data is None:
+                return None
+            data = oai_xml_to_json(oai_data)
+            return data
+    except Exception as e:
+        # first message for debugging, second to raise for visibility
+        print(f"main_bitstream: Error processing URL: {download_url}")
+        raise e
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

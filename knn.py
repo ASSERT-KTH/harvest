@@ -23,7 +23,6 @@ if not paper_id:
 # also push to pine cone
 get_embedding_semanticscholar.download_and_save(title)
 
-
 path = path_on_disk_internal_v2(title,prefix="cache/embedding.specter_v2/")
 if not os.path.exists(path):
     print("embedding not yet computed at semanticscholar, try again later")

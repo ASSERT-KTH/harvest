@@ -163,7 +163,12 @@ def get_embedding_from_paper_id(semanticscholarid, delay=SEMANTICSCHOLAR_DELAY):
 
     assert not semanticscholarid.startswith("http")
     os.makedirs(cache_dir, exist_ok=True)
-    fname = os.path.join(cache_dir, f"{semanticscholarid}.json")
+
+    # full backwards compatibility with old cache where we had URL encoded semanticscholarid for better readability
+    if "/" in semanticscholarid:
+        fname = os.path.join(cache_dir, f"{hash_string(semanticscholarid)}.json")
+    else:
+        fname = os.path.join(cache_dir, f"{semanticscholarid}.json")
 
     not_found_dir = "cache/404/"
     os.makedirs(not_found_dir, exist_ok=True)
@@ -311,9 +316,13 @@ class SemanticScholarNotFound(Exception):
         super().__init__(self.message)
         
 def get_url_from_title(title):
+    """
+    python -c "from semanticscholar_lib import get_url_from_title; print(get_url_from_title('RepairBench: Leaderboard of Frontier Models for Program Repair'))"
+    
+    """
     result = get_semantic_scholar_id_from_title(title)
     # print(result)
-    if "paperId" not in result:
+    if not result or "paperId" not in result:
         raise SemanticScholarNotFound("No data found for title: " + title)
     if normalize_title(result["title"]) == normalize_title(title):
         # print("Title matches: " + result["data"][0]["title"])
@@ -555,7 +564,7 @@ def latex_sanitize_file(path):
     with open(path, "w") as f:
         f.write(sanitized_content)
 
-def latex_sanitize(string):
+def latex_sanitize(string, reverse=False):
     """
     Sanitize a string for LaTeX by escaping all special characters.
     https://claude.ai/chat/0ec82764-0548-4922-9f01-835ebf460276
@@ -602,8 +611,14 @@ def latex_sanitize(string):
         'Ç': r'\c{C}',
     }
     
-    # Handle backslash first to avoid double-escaping
-    result = string.replace('\\', replacements['\\'])
+    if reverse:
+        # Reverse the replacements for unescaping
+        replacements = {v: k for k, v in replacements.items()}
+        accent_replacements = {v: k for k, v in accent_replacements.items()}
+        result = string
+    else:
+        # Handle backslash first to avoid double-escaping
+        result = string.replace('\\', replacements['\\'])
     
     # Replace other special characters
     for char, replacement in replacements.items():
