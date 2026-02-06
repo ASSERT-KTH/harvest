@@ -182,7 +182,18 @@ def test_collect_paper_data_from_mdpi():
     assert paper_data['venue_title'] == 'Smart Cities'
     assert paper_data['doi'] == '10.3390/smartcities8040118'
 
-
+def test_collect_paper_data_from_hal():
+    """Test collect_paper_data_from_url with HAL URL"""
+    url = "https://hal.science/hal-01956501/document"
+    paper_data = collect_paper_data_from_url(url)
+    
+    # Assert basic structure
+    assert isinstance(paper_data, dict)
+    assert paper_data['title'] == 'The Living Review on Automated Program Repair'
+    assert 'Martin Monperrus' in paper_data['authors']
+    assert 'Martin Monperrus' in paper_data['author_list']
+    assert isinstance(paper_data['author_list'], list)
+    assert paper_data['halId_s'] == 'hal-01956501' if 'halId_s' in paper_data else True
 
 def test_collect_paper_data_from_aclanthology():
     """Test collect_paper_data_from_url with ACL Anthology URL"""
@@ -201,6 +212,7 @@ def test_collect_paper_data_from_aclanthology():
     assert "Speech directed to children differs from adult-directed speech" in paper_data['abstract']
 
 def main():
+    test_collect_paper_data_from_hal()
     test_collect_paper_data_from_aclanthology()
     test_collect_paper_data_from_ieee()
     test_collect_paper_data_from_semanticscholar()

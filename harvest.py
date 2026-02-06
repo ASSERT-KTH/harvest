@@ -1622,12 +1622,14 @@ def collect_paper_data_from_hal(url):
 
             # Extract authors
             authors = ""
+            author_list = []
             if "authFullName_s" in doc:
                 author_list = doc["authFullName_s"]
                 if isinstance(author_list, list):
                     authors = ", ".join(author_list)
                 else:
                     authors = author_list
+                    author_list = [author_list]
 
             # Extract abstract
             abstract = None
@@ -1657,6 +1659,7 @@ def collect_paper_data_from_hal(url):
                 "semanticscholarid": None,
                 "tldr": None,
                 "authors": authors,
+                "author_list": author_list,
                 "venue_title": venue_title,
                 "doi": doi,
                 "abstract": abstract,
@@ -1854,7 +1857,7 @@ def collect_paper_data_from_url(url):
             return collect_paper_data_from_doi(doi)
         except Exception as e:
             print("doi error",doi)
-    if "hal.science/" in url:
+    if "hal.science/" in url or re.match(r"https://hal\..*/hal-", url):
         # fould be hal.science or inria.hal.science or theses.hal.science    
         return collect_paper_data_from_hal(url)
 
