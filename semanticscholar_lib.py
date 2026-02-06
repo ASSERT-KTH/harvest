@@ -324,6 +324,7 @@ def get_url_from_title(title):
     # print(result)
     if not result or "paperId" not in result:
         raise SemanticScholarNotFound("No data found for title: " + title)
+    # print(normalize_title(result["title"]) ,  normalize_title(title), normalize_title(result["title"]) == normalize_title(title))
     if normalize_title(result["title"]) == normalize_title(title):
         # print("Title matches: " + result["data"][0]["title"])
         data = get_paper_info_from_semantic_scholar_id(result["paperId"])
@@ -333,14 +334,14 @@ def get_url_from_title(title):
                 try:
                     return get_doi_target(data["externalIds"]["DOI"])
                 except Exception as e:
-                    raise e
+                    # raise e
                     return "https://doi.org/" + data["externalIds"]["DOI"]
             elif "ArXiv" in data["externalIds"]:
                 return "https://arxiv.org/abs/" + data["externalIds"]["ArXiv"]
-            return f"https://www.semanticscholar.org/paper/"+result["data"][0]["paperId"]
+            return f"https://www.semanticscholar.org/paper/"+result["paperId"]
             raise Exception("No DOI or ArXiv found for title: " + str(data["externalIds"]))
         # some cases with no DOI
-        else: return f"https://www.semanticscholar.org/paper/"+result["data"][0]["paperId"]
+        else: return f"https://www.semanticscholar.org/paper/"+result["paperId"]
     raise SemanticScholarNotFound("Title does not match: " + title +" "+normalize_title(result["title"]) +" "+ normalize_title(title))        
 
 def get_data_from_title(title):
@@ -582,6 +583,7 @@ def latex_sanitize(string, reverse=False):
         '\\': r'\textbackslash{}',
         # '{': r'\{',
         # '}': r'\}',
+        # 'τ': r'$\tau$',
         '$': r'\$',
         '&': r'\&',
         '%': r'\%',
