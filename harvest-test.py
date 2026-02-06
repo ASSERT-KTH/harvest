@@ -184,7 +184,24 @@ def test_collect_paper_data_from_mdpi():
 
 
 
+def test_collect_paper_data_from_aclanthology():
+    """Test collect_paper_data_from_url with ACL Anthology URL"""
+    url = "https://aclanthology.org/2020.acl-main.1/"
+    paper_data = collect_paper_data_from_url(url)
+    
+    # Assert basic structure
+    assert isinstance(paper_data, dict)
+    assert paper_data['url'] == "https://aclanthology.org/2020.acl-main.1/"
+    assert paper_data['title'] == 'Learning to Understand Child-directed and Adult-directed Speech'
+    assert paper_data['authors'] == 'Lieke Gelderloos, Grzegorz Chrupała, Afra Alishahi'
+    assert paper_data['author_list'] == ['Lieke Gelderloos', 'Grzegorz Chrupała', 'Afra Alishahi']
+    assert paper_data['venue_title'] == 'Proceedings of the 58th Annual Meeting of the Association for Computational Linguistics'
+    assert paper_data['doi'] == '10.18653/v1/2020.acl-main.1'
+    assert paper_data['year'] == 2020
+    assert "Speech directed to children differs from adult-directed speech" in paper_data['abstract']
+
 def main():
+    test_collect_paper_data_from_aclanthology()
     test_collect_paper_data_from_ieee()
     test_collect_paper_data_from_semanticscholar()
     test_collect_paper_data_from_dblp()

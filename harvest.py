@@ -1751,6 +1751,87 @@ def collect_paper_data_from_ssrn(url):
     
     return None
 
+def collect_paper_data_from_aclanthology(url):
+    """
+    python -c "import harvest; print(harvest.collect_paper_data_from_aclanthology('https://aclanthology.org/2020.acl-main.1/'))"
+    """
+    # handle pdf
+    if url.endswith(".pdf"):
+        url = url[:-4]
+    if not url.endswith("/"):
+        url = url + "/"
+
+    try:
+        response = requests.get(url)
+        if response.status_code != 200:
+            print(f"Error fetching ACL Anthology page: {response.status_code}")
+            return None
+        
+        # parser = etree.HTMLParser()
+        # tree = etree.fromstring(response.content, parser)
+        # using etree.HTML is safer for loose html
+        tree = etree.HTML(response.content)
+        
+        title = None
+        authors = ""
+        venue_title = "ACL Anthology"
+        year = None
+        doi = None
+        abstract = ""
+        
+        # Meta tags
+        meta_title = tree.xpath('//meta[@name="citation_title"]/@content')
+        if meta_title: title = meta_title[0]
+        
+        meta_authors = tree.xpath('//meta[@name="citation_author"]/@content')
+        if meta_authors: authors = ", ".join(meta_authors)
+        
+        meta_venue = tree.xpath('//meta[@name="citation_conference_title"]/@content')
+        if meta_venue: venue_title = meta_venue[0]
+        
+        meta_date = tree.xpath('//meta[@name="citation_publication_date"]/@content')
+        if meta_date:
+            # format often YYYY/MM
+            year_str = meta_date[0].split("/")[0]
+            if year_str.isdigit():
+                year = int(year_str)
+                
+        meta_doi = tree.xpath('//meta[@name="citation_doi"]/@content')
+        if meta_doi: doi = meta_doi[0]
+        
+        # Abstract
+        # <div class="card-body acl-abstract"><h5 class=card-title>Abstract</h5><span>Speech ...</span></div>
+        abs_span = tree.xpath('//div[contains(@class, "acl-abstract")]/span')
+        if abs_span:
+            abstract = abs_span[0].xpath('string(.)').strip()
+        else:
+             # fallback, get all text in acl-abstract and remove "Abstract"
+             abs_div = tree.xpath('//div[contains(@class, "acl-abstract")]')
+             if abs_div:
+                 full_text = abs_div[0].xpath('string(.)').strip()
+                 if full_text.startswith("Abstract"):
+                     abstract = full_text[8:].strip()
+                 else:
+                     abstract = full_text
+
+        return {
+            "url": url,
+            "title": title,
+            "semanticscholarid": "",
+            "abstract": abstract,
+            "tldr": "",
+            "authors": authors,
+            "author_list": meta_authors,
+            "venue_title": venue_title,
+            "doi": doi,
+            "year": year,
+            "note": None
+        }
+
+    except Exception as e:
+        print(f"Error processing ACL Anthology URL {url}: {e}")
+        return None
+
 def collect_paper_data_from_url(url):
     """
     python -c "import harvest; print(harvest.collect_paper_data_from_url('https://doi.org/10.1145/3368089.3409733'))"
@@ -1776,6 +1857,9 @@ def collect_paper_data_from_url(url):
     if "hal.science/" in url:
         # fould be hal.science or inria.hal.science or theses.hal.science    
         return collect_paper_data_from_hal(url)
+
+    if "aclanthology.org/" in url:
+        return collect_paper_data_from_aclanthology(url)
 
     # added Nov 2025
     if "/bitstream/" in url or "/bitstreams/" in url:
