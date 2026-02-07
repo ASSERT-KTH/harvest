@@ -2512,46 +2512,43 @@ def notify_email(paper, service):
 
     # body, see     def __str__(self):        r+=self.desc+"\n"        r+=self.url+"\n"
     email = str(paper)
-    
+    email_html_body = f"<p><strong>{paper.desc}</strong><br/><a href=\"{paper.url}\">{paper.url}</a></p>"
+
     if paper.venue_title and paper.venue_title != "":
         email += ""+paper.venue_title+"\n"
+        email_html_body += f"<p><strong>Venue:</strong> {paper.venue_title}</p>"
     
     if paper.tldr and paper.tldr != "":
         email += "\ntldr: "+paper.tldr
+        email_html_body += f"<p><strong>TLDR:</strong> {paper.tldr}</p>"
     
     if paper.abstract and paper.abstract != "":
         email += "\nabstract: "+paper.abstract+"\n"
+        email_html_body += f"<p><strong>Abstract:</strong> {paper.abstract}</p>"
 
     if paper.authors != "":
         email += "\nauthors:"+str(paper.authors)+"\n"
+        email_html_body += f"<p><strong>Authors:</strong> {paper.authors}</p>"
 
-    if paper.reader_url and paper.reader_url != "":
-        email += paper.reader_url+"\n"
+    # if paper.reader_url and paper.reader_url != "":
+    #     email += paper.reader_url+"\n"
 
-    email += "\n\ncategories: "+", ".join(paper.categories)+"\n"
-    email += "\nreason: "+paper.print_reason()+"\n"
+    if paper.category:
+        email += "\n\ncategories: "+", ".join(paper.categories)+"\n"
+
+    if paper.reason and paper.reason != "":
+        email += "\nreason: "+paper.print_reason()+"\n"
+        email_html_body += f"<p><strong>Reason:</strong> {paper.print_reason()}</p>"    
     
-    if paper.origin and paper.origin != "":
-        email += "origin: "+paper.origin+"\n"
-        
     if paper.note and paper.note != "":
         email += paper.note+"\n"
+        email_html_body += f"<p><strong>Note:</strong> {paper.note}</p>"
 
     # create a new email
     # Label_4447645605958895953 is label for harvest.py
     # Create HTML email content
     email_html_body = f"""<html>
-<body>
-<p><strong>{paper.desc}</strong><br/>
-<a href="{paper.url}">{paper.url}</a></p>
-{f"<p><strong>Venue:</strong> {paper.venue_title}</p>" if paper.venue_title else ""}
-{f"<p><strong>TLDR:</strong> {paper.tldr}</p>" if paper.tldr else ""}
-{f"<p><strong>Abstract:</strong> {paper.abstract}</p>" if paper.abstract else ""}
-{f"<p><strong>Authors:</strong> {paper.get_authors()}</p>"}
-<p><strong>Category:</strong> {", ".join(paper.categories)}</p>
-<p><strong>Reason:</strong> {paper.print_reason()}</p>
-{f"<pre>{paper.note}</pre>" if paper.note else ""}
-{f"<!--<p><strong>Origin:</strong> {paper.origin}</p>-->" if paper.origin else ""}
+<body>{email_html_body}
 </body>
 </html>"""
     
