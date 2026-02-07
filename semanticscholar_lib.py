@@ -53,6 +53,7 @@ def get_embedding_and_push_to_db(title, output_dir='/home/martin/workspace/schol
         embed.push_single_entry_to_pinecone("se-semanticscholar", result)
     return result
 
+MAX_AGE_BEFORE_RETRY_IN_DAYS = 5
 def get_embedding(title, output_dir='/home/martin/workspace/scholar-harvest/cache/embedding.specter_v2/', verbose=False, delay=1.0):
     """
     Get embedding for a paper title from SemanticScholar API
@@ -97,7 +98,7 @@ def get_embedding(title, output_dir='/home/martin/workspace/scholar-harvest/cach
         # Check if the file is not older than 3 weeks
         file_time = os.path.getmtime(not_found_path)
         current_time = time.time()
-        three_weeks_in_seconds = 21 * 24 * 60 * 60
+        three_weeks_in_seconds = MAX_AGE_BEFORE_RETRY_IN_DAYS * 24 * 60 * 60
         
         if current_time - file_time < three_weeks_in_seconds:
             if verbose:
@@ -117,11 +118,10 @@ def get_embedding(title, output_dir='/home/martin/workspace/scholar-harvest/cach
         if "data" not in resp or not resp["data"]:
             if verbose:
                 print(f"No matching paper found for title: {title}")
-                print(f"API response: {semanticscholar.text}")
+                print(f"get_embedding: API response: {semanticscholar.text}")
             
             # Create 404 directory if it doesn't exist            
             # Write to 404 cache to avoid future lookups
-            not_found_path = path_on_disk_internal(title, not_found_dir)
             with open(not_found_path, "w") as f:
                 f.write(json.dumps({
                     "url": url,
@@ -133,6 +133,15 @@ def get_embedding(title, output_dir='/home/martin/workspace/scholar-harvest/cach
         semanticscholarid = resp["data"][0]["paperId"]
         
         semanticscholarfull = get_embedding_from_paper_id(semanticscholarid,delay)
+
+        if not semanticscholarfull or "status" in semanticscholarfull and semanticscholarfull["status"] == "not found":
+            with open(not_found_path, "w") as f:
+                f.write(json.dumps({
+                    "url": url,
+                    "title": title,
+                    "response": semanticscholar.text
+                }, indent=2))            
+
         
         # Respect rate limits
         # print("grace delay for semanticscholar embedding call for ", title, file=sys.stderr)
@@ -154,6 +163,9 @@ def get_embedding(title, output_dir='/home/martin/workspace/scholar-harvest/cach
         raise e
         return None
 
+# authors,title,tldr,              embedding,embedding.specter_v2
+# authors,title,tldr,citationCount,embedding,embedding.specter_v2
+EMBEDDING_FIELDS = "authors,title,tldr,citationCount,embedding,embedding.specter_v2"
 def get_embedding_from_paper_id(semanticscholarid, delay=SEMANTICSCHOLAR_DELAY):
     """
     Get embedding and other details for a paper from its Semantic Scholar ID.
@@ -170,6 +182,12 @@ def get_embedding_from_paper_id(semanticscholarid, delay=SEMANTICSCHOLAR_DELAY):
     else:
         fname = os.path.join(cache_dir, f"{semanticscholarid}.json")
 
+    if os.path.exists(fname):
+        with open(fname, "r") as f:
+            data = json.load(f)
+            data["cached"] = True
+            return data
+
     not_found_dir = "cache/404/"
     os.makedirs(not_found_dir, exist_ok=True)
     # Note: 'title' is not available in this function; assuming it's passed or derived if needed
@@ -177,16 +195,18 @@ def get_embedding_from_paper_id(semanticscholarid, delay=SEMANTICSCHOLAR_DELAY):
     not_found_path = os.path.join(not_found_dir, f"{semanticscholarid}.json")
 
     if os.path.exists(not_found_path):
-        if (time.time() - os.path.getmtime(not_found_path) > 21 * 24 * 60 * 60):
+        if (time.time() - os.path.getmtime(not_found_path) > MAX_AGE_BEFORE_RETRY_IN_DAYS * 24 * 60 * 60):
             os.remove(not_found_path)
             return get_embedding_from_paper_id(semanticscholarid, delay)
         with open(not_found_path, "r") as f:
-            return json.load(f)
+            data = json.load(f)
+            data["status"] = "not found"
+            return data
         
     
     
     # Get embeddings
-    url = f"https://api.semanticscholar.org/graph/v1/paper/{semanticscholarid}?fields=authors,title,tldr,citationCount,embedding,embedding.specter_v2"
+    url = f"https://api.semanticscholar.org/graph/v1/paper/{semanticscholarid}?fields={EMBEDDING_FIELDS}"
     resp = requests.get(url, headers={"x-api-key": config.semanticscholar_key})
     
     semanticscholarfull = resp.json()
@@ -194,10 +214,12 @@ def get_embedding_from_paper_id(semanticscholarid, delay=SEMANTICSCHOLAR_DELAY):
     if 'authors' in semanticscholarfull and isinstance(semanticscholarfull['authors'], list):
         semanticscholarfull["authors_list"] = semanticscholarfull["authors"]
         semanticscholarfull["authors"] = ", ".join([a["name"] for a in semanticscholarfull["authors"]]) if "authors" in semanticscholarfull else ""
+
     # raise Exception(semanticscholarfull)
     if "embedding" not in semanticscholarfull or not semanticscholarfull["embedding"] or "vector" not in semanticscholarfull["embedding"]:
         data = {
                 "url": url,
+                "status": "not found",
                 "semanticscholarid": semanticscholarid,
                 "response": resp.text,
                 "embedding": None
