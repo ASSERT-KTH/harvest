@@ -1841,6 +1841,123 @@ def collect_paper_data_from_aclanthology(url):
         print(f"Error processing ACL Anthology URL {url}: {e}")
         return None
 
+def collect_paper_data_from_sol(url):
+    """
+    Collects metadata from sol.sbc.org.br using OAI-PMH.
+    URL example: https://sol.sbc.org.br/index.php/sscad/article/view/18982
+    URL example: https://sol.sbc.org.br/index.php/eramiars/article/download/39387/39159/
+    """
+    # Extract ID
+    # match view/ID or download/ID/GALLEY
+    match = re.search(r'/article/(?:view|download)/(\d+)', url)
+    if not match:
+        return None
+    article_id = match.group(1)
+    
+    oai_url = f"https://sol.sbc.org.br/index.php/index/oai?verb=GetRecord&metadataPrefix=oai_dc&identifier=oai:sol.sbc.org.br:article/{article_id}"
+    
+    try:
+        response = requests.get(oai_url, timeout=10)
+        if response.status_code != 200:
+            print(f"Error fetching SOL OAI: {response.status_code}")
+            return None
+            
+        tree = etree.fromstring(response.content)
+        
+        # namespaces
+        ns = {
+            'oai': 'http://www.openarchives.org/OAI/2.0/',
+            'oai_dc': 'http://www.openarchives.org/OAI/2.0/oai_dc/',
+            'dc': 'http://purl.org/dc/elements/1.1/'
+        }
+        
+        # Find record
+        record = tree.find('.//oai:record', ns)
+        if record is None:
+            return None
+            
+        metadata = record.find('.//oai:metadata', ns)
+        if metadata is None:
+            return None
+            
+        dc_root = metadata.find('.//oai_dc:dc', ns)
+        if dc_root is None:
+             # fallback
+             dc_root = metadata
+        
+        # Helper to get text
+        def get_text(xpath):
+            el = dc_root.find(xpath, ns)
+            return el.text if el is not None else None
+            
+        def get_all_text(xpath):
+            return [el.text for el in dc_root.findall(xpath, ns) if el.text]
+
+        title = get_text('dc:title') 
+        
+        titles = dc_root.findall('dc:title', ns)
+        if len(titles) > 1:
+            # try to find en-US
+            for t in titles:
+                lang = t.get('{http://www.w3.org/XML/1998/namespace}lang')
+                if lang == 'en-US':
+                    title = t.text
+                    break
+        
+        author_list = get_all_text('dc:creator')
+        authors = ", ".join(author_list)
+        
+        # Abstract
+        abstract = None
+        descriptions = dc_root.findall('dc:description', ns)
+        for d in descriptions:
+            lang = d.get('{http://www.w3.org/XML/1998/namespace}lang')
+            if lang == 'en-US':
+                abstract = d.text
+                break
+        if not abstract and descriptions:
+            abstract = descriptions[0].text
+            
+        # Venue
+        # I prefer source if it looks like a conference name.
+        sources = get_all_text('dc:source')
+        venue_title = "SBC OpenLib"
+        # Filter out "0000-0000" or simple numbers
+        for s in sources:
+            if len(s) > 15: # heuristic
+                venue_title = s
+                break
+                
+        # DOI
+        identifiers = get_all_text('dc:identifier')
+        doi = None
+        for i in identifiers:
+            if "10.5753/" in i: # SBC prefix
+                doi = i
+                break
+        
+        # Year
+        date = get_text('dc:date')
+        year = int(date[:4]) if date else None
+        
+        return {
+            "url": url,
+            "title": title,
+            "semanticscholarid": "",
+            "abstract": abstract,
+            "tldr": "",
+            "authors": authors,
+            "author_list": author_list,
+            "venue_title": venue_title,
+            "doi": doi,
+            "year": year,
+            "note": None
+        }
+
+    except Exception as e:
+        print(f"Error processing SOL URL {url}: {e}")
+        return None
+
 def collect_paper_data_from_url(url):
     """
     python -c "import harvest; print(harvest.collect_paper_data_from_url('https://doi.org/10.1145/3368089.3409733'))"
@@ -1856,6 +1973,9 @@ def collect_paper_data_from_url(url):
     abstract = None
     note = None
     year = None
+
+    if "sol.sbc.org.br" in url:
+        return collect_paper_data_from_sol(url)
 
     if "doi.org/" in url:
         doi = url.replace("https://dx.doi.org/","").replace("https://doi.org/","").replace("http://doi.org/","")

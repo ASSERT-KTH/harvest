@@ -211,7 +211,38 @@ def test_collect_paper_data_from_aclanthology():
     assert paper_data['year'] == 2020
     assert "Speech directed to children differs from adult-directed speech" in paper_data['abstract']
 
+def test_collect_paper_data_from_sol():
+    """Test collect_paper_data_from_url with SOL URL"""
+    url = "https://sol.sbc.org.br/index.php/sscad/article/view/18982"
+    paper_data = collect_paper_data_from_url(url)
+    
+    # Assert basic structure
+    assert isinstance(paper_data, dict)
+    assert paper_data['url'] == url
+    assert 'Balanceamento de Carga' in paper_data['title']
+    assert 'Nascente, Juliana M.' in paper_data['authors']
+    assert paper_data['doi'] == '10.5753/wscad.2005.18982'
+    assert paper_data['year'] == 2005
+    assert "Grids" in paper_data['abstract']
+    assert isinstance(paper_data['author_list'], list)
+    assert 'Nascente, Juliana M.' in paper_data['author_list']
+
+def test_collect_paper_data_from_sol_download():
+    """Test collect_paper_data_from_url with SOL download URL"""
+    url = "https://sol.sbc.org.br/index.php/eramiars/article/download/39387/39159/"
+    paper_data = collect_paper_data_from_url(url)
+    
+    assert isinstance(paper_data, dict)
+    assert 'Machine Learning' in paper_data['title']
+    assert 'Rocha, Tiago Rios da' in paper_data['authors']
+    assert paper_data['doi'] == '10.5753/eramiars.2025.16666'
+    assert paper_data['year'] == 2025
+    assert isinstance(paper_data['author_list'], list)
+    assert 'Rocha, Tiago Rios da' in paper_data['author_list']
+
 def main():
+    test_collect_paper_data_from_sol_download()
+    test_collect_paper_data_from_sol()
     test_collect_paper_data_from_hal()
     test_collect_paper_data_from_aclanthology()
     test_collect_paper_data_from_ieee()
