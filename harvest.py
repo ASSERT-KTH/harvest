@@ -1185,11 +1185,12 @@ def collect_paper_data_from_diva(url):
 
     # Call the DiVA API
     api_url = f"https://www.monperrus.net/martin/diva-urn-json.py?urn={diva_id}"
-    print(api_url)
+    # print(api_url)
     try:
         response = requests.get(api_url)
         response.raise_for_status()
         diva_data = response.json()
+        # print(diva_data)
     except (requests.RequestException, json.JSONDecodeError) as e:
         print(f"Error fetching or parsing DiVA data for {diva_id}: {e}")
         return {
@@ -1210,7 +1211,7 @@ def collect_paper_data_from_diva(url):
     # Title
     title = "failure to parse title"
     try:
-        title = mods.get('titleInfo', {}).get(O).get('title')
+        title = mods.get('titleInfo', {}).get('title')
     except: pass
 
     # Authors
@@ -1221,13 +1222,15 @@ def collect_paper_data_from_diva(url):
             name_parts = person.get('namePart', [])
             if len(name_parts) >= 2:
                 author_list.append(f"{name_parts[1]} {name_parts[0]}") # Given Family
-                venue_title = "Thesis at "+str(person.get('affiliation',"")[0])
+                #print(person.get('affiliation',""))
+                affiliation = person.get('affiliation', "") if type(person.get('affiliation', "")) == str else person.get('affiliation', [""])[0]
+                venue_title = "Thesis at "+str(affiliation)
     authors = ", ".join(author_list)
 
     # Abstract
     abstract_html = None
     try:
-        abstract_html = mods.get('abstract')[0]
+        abstract_html = mods.get('abstract') if type(mods.get('abstract')) == str else mods.get('abstract', ["no abstract"])[0]
     except: pass
 
 
