@@ -213,6 +213,7 @@ class Paper:
         self.category = None
         self.categories = []
         self.origin = None
+        self.tldr = None
 
     def note_subject(self, subject):
         type_a = type_alert(subject)
@@ -2560,19 +2561,23 @@ def notify_email(paper, service):
     
     # add one single labelId tag to reduce reviewing time
     category_label_ids = []
-    label = get_labelId(random.choice(paper.categories))
-    if not label.startswith("https://"):
-        category_label_ids.append(label)
+    if len(paper.categories) > 0:
+        label = get_labelId(random.choice(paper.categories))
+        if not label.startswith("https://"):
+            category_label_ids.append(label)
 
     # 1. historical notification via gmail api
     if service != None and str(type(service)) == "<class 'googleapiclient.discovery.Resource'>":
-        return push_email_via_gmail(service, msg, category_label_ids)
+        push_email_via_gmail(service, msg, category_label_ids)
     
     # 2. new notification via direct SMTP email
     notify_followers(paper, email_html_body)
 
     # 3. test email to myself
     send_email(paper.desc, email_html_body,"martin.monperrus@laposte.net")
+
+    with open(path, "w") as f:
+        f.write(f"{paper.desc}: notified")
 
 def push_email_via_gmail(service, msg, category_label_ids):
     """
@@ -2599,6 +2604,7 @@ def push_email_via_gmail(service, msg, category_label_ids):
         rfc822msgid = None
 
 def notify_followers(paper, email_html_body):
+    if not paper.category: return
     # test of sending emails, it works
     # if "webassembly" in paper.desc.lower(): # old sending emails vie gmail
     #     # send email to some collaborators
