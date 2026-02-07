@@ -2325,17 +2325,26 @@ def collect_paper_data_from_openreview(url):
     if not forum_id:
         return None
 
-    api_url = f"https://api2.openreview.net/notes?forum={forum_id}&limit=1"
+    api_url = f"https://api2.openreview.net/notes?forum={forum_id}"
     resp = requests.get(api_url, timeout=10)
     if resp.status_code != 200:
         raise Exception(f"OpenReview API error {resp.status_code} for forum {forum_id}")
     data = resp.json()
 
+    # print("OpenReview API response", json.dumps(data, indent=2)) # debug
+
     # API can return 'notes' or 'rows'
     notes = data.get('notes') or data.get('rows') or []
     if not notes:
         return None
+
+    # finding the right note
     note = notes[0]
+    for n in notes:
+        # if len(note.get('content', {}).get('decision', {})) > 0:
+        #     continue
+        if len(n.get('content', {}).get('abstract', {})) > 0:  
+            note = n        
 
     content = note.get('content', {}) if isinstance(note, dict) else {}
     title = content.get('title').get("value") or note.get('title').get("value") or ""
