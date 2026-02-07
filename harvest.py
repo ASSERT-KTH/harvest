@@ -224,6 +224,8 @@ class Paper:
         print(str(self))
 
     def print_reason(self):
+        if type(self.reason) == str:
+            return self.reason
         return ", ".join(self.array_reason())
     def array_reason(self):
         return self.reason
