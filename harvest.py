@@ -1681,7 +1681,6 @@ def collect_paper_data_from_hal(url):
 def collect_paper_data_from_ssrn(url):
     """
     Extracts paper metadata from SSRN URLs.
-    Uses wget to bypass potential Cloudflare blocks.
     """
     title = None
     authors = ""
@@ -1693,16 +1692,13 @@ def collect_paper_data_from_ssrn(url):
     tldr = ""
     note = None
 
-    user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-    cmd = ["wget", "-q", "--user-agent=" + user_agent, "-O", "-", url]
-    
+    cmd = ["curl-cffi-cli.py", url]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         html_content = result.stdout
         
         parser = etree.HTMLParser()
         tree = etree.fromstring(html_content, parser)
-
         # Title
         meta_title = tree.xpath('//meta[@name="citation_title"]/@content')
         if meta_title:
@@ -1741,23 +1737,21 @@ def collect_paper_data_from_ssrn(url):
             except:
                 pass
 
-        if title:
-            return {
-                "url": url,
-                "title": title,
-                "semanticscholarid": semanticscholarid,
-                "abstract": abstract,
-                "tldr": tldr,
-                "authors": authors,
-                "venue_title": venue_title,
-                "doi": doi,
-                "year": year,
-                "note": note
-            }
+        return {
+            "url": url,
+            "title": title,
+            "semanticscholarid": semanticscholarid,
+            "abstract": abstract,
+            "tldr": tldr,
+            "authors": authors,
+            "venue_title": venue_title,
+            "doi": doi,
+            "year": year,
+            "note": note
+        }
 
     except Exception as e:
         print(f"Error fetching/parsing SSRN data for {url}: {e}")
-    
     return None
 
 def collect_paper_data_from_aclanthology(url):
@@ -2008,7 +2002,7 @@ def collect_paper_data_from_url(url):
         return collect_paper_from_researchgate(url)
     
     if "ssrn.com/" in url:
-        return collect_paper_data_from_ssrn(url)
+        return  collect_paper_data_from_ssrn(url)
     
     if "dblp.org/" in url:
         return collect_paper_data_from_dblp(url)
@@ -3460,6 +3454,69 @@ def collect_and_send_email(url):
     
     # Check if high reputation and send notification
     notify_email(paper, service)
+
+def notify_for_all_keyword():
+    """
+    Read all papers in cache/toread, send email notifications only if the title has one of the keyword of category "smart contract" above.
+    
+    python -c "import harvest; harvest.notify_for_all_keyword()"
+    """
+    # Set up Gmail service
+    service = build('gmail', 'v1', http=get_creds().authorize(Http()))
+
+    toread_dir = "/home/martin/workspace/scholar-harvest/cache/toread/"
+    smart_contract_keywords = [kw.lower() for kw in CLASSIFICATION_DATA['Smart contracts']]
+
+    # Get all files in toread
+    toread_files = glob.glob(toread_dir + "*")
+    print(f"Found {len(toread_files)} papers in toread")
+
+    notified_count = 0
+    skipped_count = 0
+    error_count = 0
+
+    for filepath in toread_files:
+        try:
+            # Load paper data from file
+            with open(filepath, "r") as f:
+                paper_data = json.load(f)
+            
+            title = paper_data.get("title", "").lower()
+            
+            # Check if title contains any smart contract keyword
+            has_smart_contract_keyword = any(keyword in title for keyword in smart_contract_keywords)
+            
+            if has_smart_contract_keyword:
+                # Create Paper object and restore data
+                paper = Paper(paper_data.get("url", ""), paper_data.get("title", ""))
+                transfer_data_from_dict_to_paper(paper, paper_data)
+                
+                # Compute categories using keywords
+                paper.categories = [x[1] for x in compute_category_keywords_paper(paper)]
+                
+                # Check if paper has reason
+                if "Smart contracts" in paper.categories:
+                    paper.reason = "title match"
+                
+                # Send email notification
+                notify_email(paper, service)
+                os.remove(filepath)
+                notified_count += 1
+                
+                print(f"Notified: {paper.desc}...")
+            else:
+                skipped_count += 1
+                
+        except Exception as e:
+            error_count += 1
+            print(f"Error processing {filepath}: {e}")
+            raise e
+
+    print(f"\nProcessing complete:")
+    print(f"  Notified (smart contracts): {notified_count}")
+    print(f"  Skipped (no keywords): {skipped_count}")
+    print(f"  Errors: {error_count}")
+
 
 def notify_for_all_categorized_papersto_read():
     """
