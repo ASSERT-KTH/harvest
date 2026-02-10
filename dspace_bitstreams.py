@@ -219,6 +219,7 @@ def process_bitstream_url_oai_pmh(download_url):
 
         record = root.find(".//oai:record", ns)
         if record is None:
+            return None
             raise Exception("No record found")
 
         return record
@@ -228,6 +229,7 @@ def process_bitstream_url_oai_pmh(download_url):
             return None
 
         print(f"Error processing DSpace OAI-PMH URL: {base_url} (HTTP {resp.status_code}) \\{resp.text}")
+        resp.text[:200] if resp.text else ""
         raise e
 
 

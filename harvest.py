@@ -842,7 +842,7 @@ def collect_paper_data_from_url_with_cache(url):
                 os.remove(thepath)
             return None
         if data["title"] and len(data["title"])>0:
-            print("\033[92m✔\033[0mgood, writing cache for ", url)
+            print("\033[92m✔\033[0mgood, writing cache for ", data["title"], url)
             
             with open(thepath, "w") as f:
                 f.write(json.dumps(data))
