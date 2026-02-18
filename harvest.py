@@ -3241,7 +3241,14 @@ def classify_planetse():
         url = [h['value'] for h in payload['headers'] if h['name']=='X-RSS-URL'][0]
         
         # get the embedding
-        get_embedding(subj)
+        embedding = get_embedding_and_push_to_db(subj)
+
+        # we delete the todo only if we have an embedding
+        if embedding and embedding.get("embedding") and embedding["embedding"].get("vector"):
+            collect_paper_data_from_url_with_cache(url)
+            service.users().messages().trash(userId='me', id=m['id']).execute()
+
+        continue
 
         # avoid duplicate
         paper = Paper(url, subj)
