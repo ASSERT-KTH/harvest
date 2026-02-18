@@ -3455,7 +3455,9 @@ def collect_and_send_email(url):
     # Check if high reputation and send notification
     notify_email(paper, service)
 
-def notify_for_all_keyword():
+
+
+def notify_for_all_keyword(keyword):
     """
     Read all papers in cache/toread, send email notifications only if the title has one of the keyword of category "smart contract" above.
     
@@ -3483,27 +3485,24 @@ def notify_for_all_keyword():
             
             title = paper_data.get("title", "").lower()
             
-            # Check if title contains any smart contract keyword
-            has_smart_contract_keyword = any(keyword in title for keyword in smart_contract_keywords)
+
+            # Create Paper object and restore data
+            paper = Paper(paper_data.get("url", ""), paper_data.get("title", ""))
+            transfer_data_from_dict_to_paper(paper, paper_data)
             
-            if has_smart_contract_keyword:
-                # Create Paper object and restore data
-                paper = Paper(paper_data.get("url", ""), paper_data.get("title", ""))
-                transfer_data_from_dict_to_paper(paper, paper_data)
-                
-                # Compute categories using keywords
-                paper.categories = [x[1] for x in compute_category_keywords_paper(paper)]
-                
-                # Check if paper has reason
-                if "Smart contracts" in paper.categories:
-                    paper.reason = "title match"
-                
+            # Compute categories using keywords
+            paper.categories = [x[1] for x in compute_category_keywords_paper(paper)]
+            
+            # Check if paper has reason
+            if keyword in paper.categories:
+                paper.reason = "title match"
+            
                 # Send email notification
                 notify_email(paper, service)
                 os.remove(filepath)
                 notified_count += 1
                 
-                print(f"Notified: {paper.desc}...")
+                print(f"* {paper.desc} {paper.url}")
             else:
                 skipped_count += 1
                 
@@ -3513,7 +3512,7 @@ def notify_for_all_keyword():
             raise e
 
     print(f"\nProcessing complete:")
-    print(f"  Notified (smart contracts): {notified_count}")
+    print(f"  Notified ({keyword}): {notified_count}")
     print(f"  Skipped (no keywords): {skipped_count}")
     print(f"  Errors: {error_count}")
 
