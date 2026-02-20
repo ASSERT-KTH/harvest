@@ -28,13 +28,31 @@ def path_on_disk_internal(papertitle, prefix = "/home/martin/workspace/scholar-h
 
 def get_doi_target(doi):
     # https://doi.org/api/handles/10.1145/3597503.3623337
+    return get_doi_target_redirect(doi)
+
+def get_doi_target_redirect(doi):
+    url = f"https://doi.org/{doi}"
+    response = requests.get(url, allow_redirects=True)
+    response.raise_for_status()
+    return response.url
+
+def get_doi_target_api(doi):
+    """
+    Alternative method to get DOI target URL using the DOI API. This is more robust to redirects and can provide metadata.
+
+    This does not work when there are HS_ALIAS for errors, see 
+
+    """
+    # https://doi.org/api/handles/10.1145/3597503.3623337
     url = f"https://doi.org/api/handles/{doi}"
     data = requests.get(url).json()
+    print(json.dumps(data, indent=2))
     if data["responseCode"] == 1:
         for i in data["values"]:
             if i["type"] == "URL":
                 return i["data"]["value"]
     raise Exception("doi not found")
+
 
 def get_cached_paper_data(title):
     path = path_on_disk_internal_v2(title,prefix="/home/martin/workspace/scholar-harvest/cache/harvest/")

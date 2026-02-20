@@ -2383,6 +2383,18 @@ def collect_paper_data_from_dblp(url):
     try:
         # https://dblp.org/rec/conf/icst/AlshammariAHB24.xml
         # example https://www.monperrus.net/martin/dblp-json.py?id=conf/icst/AlshammariAHB24
+
+        # map https://dblp.org/db/conf/cgo/cgo2024.html#ArmengolEstapeWCO24
+        # to  https://dblp.org/rec/conf/cgo/ArmengolEstapeWCO24.html
+        db_match = re.match(r'https://dblp\.org/db/(.+)/[^/]+\.html#(.+)', url)
+        if db_match:
+            path_prefix = db_match.group(1)  # e.g. conf/cgo
+            paper_key = db_match.group(2)    # e.g. ArmengolEstapeWCO24
+            # keep only the last component of path_prefix (venue) for the rec path
+            # the rec key is path_prefix + "/" + paper_key
+            url = f"https://dblp.org/rec/{path_prefix}/{paper_key}.html"
+            print(url)
+
         components = [x for x in url.split("/") if len(x)>0]
         dblp_id = "/".join(components[-3:])
         dblp_id = dblp_id.replace(".html","").replace(".xml","")
