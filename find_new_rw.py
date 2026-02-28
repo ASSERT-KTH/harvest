@@ -84,6 +84,7 @@ if __name__ == "__main__":
     # print(urls)
 
     incorrect_titles = []
+    all_citations = []  # (title, url) for every resolved input paper
 
     paperIds = set()
 
@@ -109,6 +110,9 @@ if __name__ == "__main__":
         if paperId:
             paperIds.add(paperId)
 
+        if data and "title" in data:
+            all_citations.append((data["title"], url))
+
         url2 = f"https://www.semanticscholar.org/paper/{paperId}"
         # print(url2)
         citing_data = harvest.collect_paper_data_from_url_with_cache(url2)
@@ -117,6 +121,14 @@ if __name__ == "__main__":
                 incorrect_titles.append((url, citing_data))
     for (url, citing_data) in incorrect_titles:
         print("INCORRECT TITLE",url, citing_data["title"])
+
+    print(f"## All citations in {source_text}:")
+    i=1
+    for title, url in all_citations:
+        print(f"{title}")
+        print(url)
+        print()
+        i += 1
 
     # now checking for very close papers in embedding space
     # Collect embeddings for all papers mentioned in the issue
@@ -134,6 +146,8 @@ if __name__ == "__main__":
 
         for x in semanticscholar_lib.get_citing_papers(paperId):
             citer = semanticscholar_lib.get_paper_info_from_semantic_scholar_id(x)
+            if "title" not in citer:
+                continue
             if citer["title"].lower() in content.lower():
                 continue
             citations[citer["title"]] += 1

@@ -42,6 +42,8 @@ def get_doi_target_api(doi):
 
     This does not work when there are HS_ALIAS for errors, see 
 
+    Documentation: https://www.doi.org/the-identifier/resources/factsheets/doi-resolution-documentation
+
     """
     # https://doi.org/api/handles/10.1145/3597503.3623337
     url = f"https://doi.org/api/handles/{doi}"

@@ -768,6 +768,8 @@ def log_problem_cases(url, log_file_path="cache/domains-no-api.support.jsonl"):
         return
     parsed_url = urlparse(url)
     domain = parsed_url.netloc
+    if domain == "search.ebscohost.com":
+        return
     log_entry = {"domain": domain, "url": url}
     os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
     with open(log_file_path, "a") as f:
@@ -2146,6 +2148,7 @@ def collect_paper_data_from_url(url):
             try:
                 ieeedata = resp.json()
             except Exception as e:
+                return None
                 raise Exception("ieee error",resp.status_code,resp.text, resp.headers)
                 
             if "error" not in ieeedata and "articles" in ieeedata:
