@@ -2422,7 +2422,7 @@ def collect_paper_data_from_dblp(url):
         #     url = get_doi_target(dblp_metadata["ee"])
         # print("TODO implement DOI and chain for DBLP")
     except Exception as e:
-        print("collect_paper_data_from_dblp",dblp_url, dblp_resp.status_code, dblp_resp.text) # debug
+        print(f"collect_paper_data_from_dblp {dblp_url}") # debug
         print("Error in collect_paper_data_from_dblp", e)
     return None
 
