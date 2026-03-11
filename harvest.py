@@ -1959,242 +1959,247 @@ def collect_paper_data_from_url(url):
     python -c "import harvest; print(harvest.collect_paper_data_from_url('https://doi.org/10.1145/3368089.3409733'))"
 
     """
-    title = None
-    authors=""
-    author_list=None
-    semanticscholarid=""
-    tldr=""
-    venue_title = None
-    doi=None
-    abstract = None
-    note = None
-    year = None
+    try:
+        title = None
+        authors=""
+        author_list=None
+        semanticscholarid=""
+        tldr=""
+        venue_title = None
+        doi=None
+        abstract = None
+        note = None
+        year = None
 
-    if "sol.sbc.org.br" in url:
-        return collect_paper_data_from_sol(url)
+        if "sol.sbc.org.br" in url:
+            return collect_paper_data_from_sol(url)
 
-    if "doi.org/" in url:
-        doi = url.replace("https://dx.doi.org/","").replace("https://doi.org/","").replace("http://doi.org/","")
-        try:
-            return collect_paper_data_from_doi(doi)
-        except Exception as e:
-            print("doi error",doi)
-    if "hal.science/" in url or re.match(r"https://hal\..*/hal-", url):
-        # fould be hal.science or inria.hal.science or theses.hal.science    
-        return collect_paper_data_from_hal(url)
-
-    if "aclanthology.org/" in url:
-        return collect_paper_data_from_aclanthology(url)
-
-    # added Nov 2025
-    if "/bitstream/" in url or "/bitstreams/" in url:
-        dspace= dspace_bitstreams.main_bitstream(url)
-        if dspace:
-            return dspace
-
-    if "arxiv.org/" in url:    
-        ## https://www.monperrus.net/martin/arxiv-json.py?id=2304.12015
-        return collect_paper_data_from_arxiv(url)
-
-    if "diva-portal.org/" in url:    
-        ## https://www.monperrus.net/martin/arxiv-json.py?id=2304.12015
-        return collect_paper_data_from_diva(url)
-    
-    if "researchgate.net/" in url:
-        return collect_paper_from_researchgate(url)
-    
-    if "ssrn.com/" in url:
-        return  collect_paper_data_from_ssrn(url)
-    
-    if "dblp.org/" in url:
-        return collect_paper_data_from_dblp(url)
-
-
-    if "dl.acm.org" in url:
-        components = [x for x in url.split("/") if len(x)>0]
-        doi = components[-2]+"/"+components[-1]
-        crossref_data = info_from_crossref(doi)
-        if crossref_data: return crossref_data
-        # no api for acm
-        # see https://stackoverflow.com/questions/33380715/acm-digital-library-access-with-r-no-api-so-how-possible
-        # alternative 1: go through crossref
-        # alternative 2: there is the bibtex export which actually returns json
-        req = requests.post('https://dl.acm.org/action/exportCiteProcCitation', data={
-            'dois': doi,
-            'format': 'bibTex',
-            'targetFile': 'custom-bibtex',
-        })
-        if '<!DOCTYPE html>' not in req.text:
-            r = req.json()
-            if "container-title" in r["items"][0][doi]:
-                venue_title = r["items"][0][doi]["container-title"]
-            elif "container-title-short" in r["items"][0][doi]:
-                venue_title = r["items"][0][doi]["container-title-short"]
-            else:
-                print("TODO dl.acm.org"+str(r["items"][0][doi].keys()))
-            title = r["items"][0][doi]["title"]
+        if "doi.org/" in url:
+            doi = url.replace("https://dx.doi.org/","").replace("https://doi.org/","").replace("http://doi.org/","")
             try:
-                authors = ", ".join([x["given"]+" "+x["family"] for x in r["items"][0][doi]["author"]])
-            except: pass
-        # print("acm.org TODO implement call to https://dl.acm.org/action/exportCiteProcCitation")
-
-    if "link.springer.com" in url:
-        # example url-analysis.py http://link.springer.com/10.1007/s11219-025-09709-4
-        components = [x for x in url.split("/") if len(x)>0]
-
-        # default
-        doi = components[-2]+"/"+components[-1]
-
-        # example https://link.springer.com/content/pdf/10.1007/s10664-020-09920-w.pdf
-        if components[-1].endswith(".pdf"):
-            doi = components[-2]+"/"+components[-1][0:-4]
-        # https://dev.springernature.com/
-        # https://dev.springernature.com/docs/api-endpoints/metadata-api/
-        # GET https://api.springernature.com/meta/v2/json?api_key=YOUR_API_KEY&q=doi:YOUR_DOI
-        springer_url = f"https://api.springernature.com/meta/v2/json?api_key={config.springernature_key}&q=doi:{doi}"
-        springer_data = requests.get(springer_url).json()
-        if "records" in springer_data and len(springer_data["records"])>0:
-            # print(url)
-            paper_data = springer_data["records"][0]
-            venue_title=paper_data["publicationName"]
-            abstract=paper_data["abstract"]
-            title=paper_data["title"]
-            author_list = [x["creator"] for x in paper_data["creators"]]
-            authors = " | ".join(author_list)
-            year = paper_data.get("onlineDate","")[0:4]
-        else: print("no records found in Springer "+url)
-
-        # print(springer_data)
-        
-    if "computer.org" in url:
-        csdlid = [x for x in url.split("/") if len(x)>0][-1]
-        cdsl_data = get_cdsl_data(csdlid)
-        if "error" in cdsl_data:
-            return None
-        doi = cdsl_data["doi"]
-        abstract = cdsl_data["abstract"]
-        title = cdsl_data["title"]
-        author_list = [x["fullName"] for x in cdsl_data["authors"]]
-        authors = " | ".join(author_list)
-        # print(cdsl_data)
-        # at KTH we need to pass through IEEE Xplore and the DOI resolves to that
-        url = "https://doi.org/"+doi
-
-    if 'sciencedirect.com' in url:
-        # https://dev.elsevier.com/documentation/ScienceDirectSearchAPI.wadl#d1e166
-        # GET https://dev.elsevier.com/documentation/ScienceDirectSearchAPI.wadl#d1e166
-        # apikey key registered in https://dev.elsevier.com/apikey/manage but not required for the core content
-        # query param
-        # probably with title or id 
-        # example https://www.sciencedirect.com/science/article/pii/S016764232400100X
-        # https://api.elsevier.com/content/search/sciencedirect?query=all(Articulation+Disorders)
-        # curl -H "x-els-apikey: xxxxxx" -H "content-type: application/json" -H "Accept: application/json" "https://api.elsevier.com/content/search/sciencedirect?query=all(Articulation+Disorders)"
-        # curl -H "Accept: application/json" -H "x-els-apikey: xxxxxx" "https://api.elsevier.com/content/article/doi/10.1016/j.prosdent.2024.08.001" 
-        # ["coredata"]["prism:publicationName"]
-        # curl -H "Accept: application/json" -H "x-els-apikey: xxxxxx" "https://api.elsevier.com/content/article/pii/S0950584924002593" 
-        pattern = r'/pii/([A-Z0-9]+)'
-
-        match = re.search(pattern, url)
-        if match:
-            pii = match.group(1)
-            api_url = 'https://api.elsevier.com/content/article/pii/'+ pii + "?httpAccept=application/json"
-            elsevier_data = requests.get(api_url, headers = {"x-els-apikey":config.sciencedirect_key}).json()
-            # print("elsevier_data",pii,json.dumps(elsevier_data, indent=2))
-            if "full-text-retrieval-response" in elsevier_data:
-                venue_title = elsevier_data["full-text-retrieval-response"]["coredata"]["prism:publicationName"]
-                doi = elsevier_data["full-text-retrieval-response"]["coredata"]["prism:doi"]
-                title = elsevier_data["full-text-retrieval-response"]["coredata"]["dc:title"]
-                abstract = elsevier_data["full-text-retrieval-response"]["coredata"]["dc:description"]
-                url = url.replace('?dgcid=rss_sd_all','')
-                author_list = []
-                for x in elsevier_data["full-text-retrieval-response"]["coredata"]["dc:creator"]:
-                    author_list.append(x["$"])
-                authors = ", ".join(author_list)
-                # print(authors)
-            # print(elsevier_data)
-            # note the abstract is not available in the free version of the API
-            # author = " and ".join([x["$"] for x in elsevier_data["full-text-retrieval-response"]["coredata"]["dc:creator"]])
-            # example curl -H "Accept: application/json" -H "x-els-apikey: xxxxxx" "https://api.elsevier.com/content/article/pii/S0950584924002593" 
-            # print('curl -H "Accept: application/json" -H "x-els-apikey: xxxxxx" "https://api.elsevier.com/content/article/pii/'+pii)
-            # now get on kth network via SSH, Socks or HTTP proxy
-        
-        # must be done from the kth network, so through SSH or proxy, unclear whether it's actually the case
-        # print("implement doi retrieval for sciencedirect")
-        pass
-
-    if "ieeexplore.ieee.org" in url:
-        # special case
-        url = url.replace("/figures#figures","")
-
-        # rate limit see https://developer.ieee.org/API_Terms_of_Use2
-        # not documented in response headers
-        # rate limit on https://developer.ieee.org/apps/myapis
-        #  10 Calls per second / 200 Calls per day
-        # we can also get tldr for ieee papers
-        if "abs_all.jsp" in url:
-            # parse url
-            components = urllib.parse.urlparse(url)
-            qdict = urllib.parse.parse_qs(components.query)
-            ieeeid = qdict["arnumber"][0]
-            # print(qdict)
-        else:
-            ieeeid = [x for x in url.split("/") if len(x)>0][-1].replace(".pdf","")
-        # curl "https://ieeexploreapi.ieee.org/api/v1/search/articles?apiKey=XXXXXX&article_number=10833642"
-
-        req_url = "https://ieeexploreapi.ieee.org/api/v1/search/articles?article_number="+ieeeid+"&apiKey="+config.ieeexplore_key
-        resp = requests.get(req_url)
-        if resp.status_code != 418: # i'm a teapot, WTF?
-            # print(resp.text)
-            try:
-                ieeedata = resp.json()
+                return collect_paper_data_from_doi(doi)
             except Exception as e:
-                return None
-                raise Exception("ieee error",resp.status_code,resp.text, resp.headers)
-                
-            if "error" not in ieeedata and "articles" in ieeedata:
-                if "doi" in ieeedata["articles"][0]:
-                    doi = ieeedata["articles"][0]["doi"]
-                venue_title = ieeedata["articles"][0]["publication_title"]
-                abstract = ieeedata["articles"][0]["abstract"] if "abstract" in  ieeedata["articles"][0] else ""
-                # print ([x for x in ieeedata["articles"][0]["authors"]["authors"]])
-                # args the ["authors"]["authors"], bad data model
-                author_list = [x["full_name"] for x in ieeedata["articles"][0]["authors"]["authors"]]
-                authors = ", ".join([x["full_name"] for x in ieeedata["articles"][0]["authors"]["authors"]])
-                title = ieeedata["articles"][0]["title"]                
-                # semanticscholarid="doi:"+doi
-            else: print("no data in ieee "+json.dumps(ieeedata, indent=2))
+                print("doi error",doi)
+        if "hal.science/" in url or re.match(r"https://hal\..*/hal-", url):
+            # fould be hal.science or inria.hal.science or theses.hal.science    
+            return collect_paper_data_from_hal(url)
 
-    if "semanticscholar.org/" in url:
-        return collect_paper_data_from_semanticscholar(url)
+        if "aclanthology.org/" in url:
+            return collect_paper_data_from_aclanthology(url)
 
-    if "mdpi.com/" in url:
-        return collect_paper_data_from_mdpi(url)
+        # added Nov 2025
+        if "/bitstream/" in url or "/bitstreams/" in url:
+            dspace= dspace_bitstreams.main_bitstream(url)
+            if dspace:
+                return dspace
 
-    if "openreview.net/" in url:
-        return collect_paper_data_from_openreview(url)
+        if "arxiv.org/" in url:    
+            ## https://www.monperrus.net/martin/arxiv-json.py?id=2304.12015
+            return collect_paper_data_from_arxiv(url)
 
-    if "preprints.org/" in url:
-        return collect_paper_data_from_preprints_org(url)
+        if "diva-portal.org/" in url:    
+            ## https://www.monperrus.net/martin/arxiv-json.py?id=2304.12015
+            return collect_paper_data_from_diva(url)
+        
+        if "researchgate.net/" in url:
+            return collect_paper_from_researchgate(url)
+        
+        if "ssrn.com/" in url:
+            return  collect_paper_data_from_ssrn(url)
+        
+        if "dblp.org/" in url:
+            return collect_paper_data_from_dblp(url)
 
-    if title == None:
-        # default from Zotero Translation Server
-        zotero_data = get_zotero_translator_service_url(url)
-        if zotero_data != None and len(zotero_data)>0:
-            return transform_zotero_to_output(zotero_data)
+
+        if "dl.acm.org" in url:
+            components = [x for x in url.split("/") if len(x)>0]
+            doi = components[-2]+"/"+components[-1]
+            crossref_data = info_from_crossref(doi)
+            if crossref_data: return crossref_data
+            # no api for acm
+            # see https://stackoverflow.com/questions/33380715/acm-digital-library-access-with-r-no-api-so-how-possible
+            # alternative 1: go through crossref
+            # alternative 2: there is the bibtex export which actually returns json
+            req = requests.post('https://dl.acm.org/action/exportCiteProcCitation', data={
+                'dois': doi,
+                'format': 'bibTex',
+                'targetFile': 'custom-bibtex',
+            })
+            if '<!DOCTYPE html>' not in req.text:
+                r = req.json()
+                if "container-title" in r["items"][0][doi]:
+                    venue_title = r["items"][0][doi]["container-title"]
+                elif "container-title-short" in r["items"][0][doi]:
+                    venue_title = r["items"][0][doi]["container-title-short"]
+                else:
+                    print("TODO dl.acm.org"+str(r["items"][0][doi].keys()))
+                title = r["items"][0][doi]["title"]
+                try:
+                    authors = ", ".join([x["given"]+" "+x["family"] for x in r["items"][0][doi]["author"]])
+                except: pass
+            # print("acm.org TODO implement call to https://dl.acm.org/action/exportCiteProcCitation")
+
+        if "link.springer.com" in url:
+            # example url-analysis.py http://link.springer.com/10.1007/s11219-025-09709-4
+            components = [x for x in url.split("/") if len(x)>0]
+
+            # default
+            doi = components[-2]+"/"+components[-1]
+
+            # example https://link.springer.com/content/pdf/10.1007/s10664-020-09920-w.pdf
+            if components[-1].endswith(".pdf"):
+                doi = components[-2]+"/"+components[-1][0:-4]
+            # https://dev.springernature.com/
+            # https://dev.springernature.com/docs/api-endpoints/metadata-api/
+            # GET https://api.springernature.com/meta/v2/json?api_key=YOUR_API_KEY&q=doi:YOUR_DOI
+            springer_url = f"https://api.springernature.com/meta/v2/json?api_key={config.springernature_key}&q=doi:{doi}"
+            springer_data = requests.get(springer_url).json()
+            if "records" in springer_data and len(springer_data["records"])>0:
+                # print(url)
+                paper_data = springer_data["records"][0]
+                venue_title=paper_data["publicationName"]
+                abstract=paper_data["abstract"]
+                title=paper_data["title"]
+                author_list = [x["creator"] for x in paper_data["creators"]]
+                authors = " | ".join(author_list)
+                year = paper_data.get("onlineDate","")[0:4]
+            else: print("no records found in Springer "+url)
+
+            # print(springer_data)
             
-    return {
-        "url":url,
-        "title":title,
-        "semanticscholarid":semanticscholarid,
-        "abstract":abstract,
-        "tldr": tldr,
-        "authors": authors,
-        "author_list": author_list,
-        "venue_title" : venue_title,
-        "doi" : doi,
-        "year" : year,
-        "note" : note
-    }
+        if "computer.org" in url:
+            csdlid = [x for x in url.split("/") if len(x)>0][-1]
+            cdsl_data = get_cdsl_data(csdlid)
+            if "error" in cdsl_data:
+                return None
+            doi = cdsl_data["doi"]
+            abstract = cdsl_data["abstract"]
+            title = cdsl_data["title"]
+            author_list = [x["fullName"] for x in cdsl_data["authors"]]
+            authors = " | ".join(author_list)
+            # print(cdsl_data)
+            # at KTH we need to pass through IEEE Xplore and the DOI resolves to that
+            url = "https://doi.org/"+doi
+
+        if 'sciencedirect.com' in url:
+            # https://dev.elsevier.com/documentation/ScienceDirectSearchAPI.wadl#d1e166
+            # GET https://dev.elsevier.com/documentation/ScienceDirectSearchAPI.wadl#d1e166
+            # apikey key registered in https://dev.elsevier.com/apikey/manage but not required for the core content
+            # query param
+            # probably with title or id 
+            # example https://www.sciencedirect.com/science/article/pii/S016764232400100X
+            # https://api.elsevier.com/content/search/sciencedirect?query=all(Articulation+Disorders)
+            # curl -H "x-els-apikey: xxxxxx" -H "content-type: application/json" -H "Accept: application/json" "https://api.elsevier.com/content/search/sciencedirect?query=all(Articulation+Disorders)"
+            # curl -H "Accept: application/json" -H "x-els-apikey: xxxxxx" "https://api.elsevier.com/content/article/doi/10.1016/j.prosdent.2024.08.001" 
+            # ["coredata"]["prism:publicationName"]
+            # curl -H "Accept: application/json" -H "x-els-apikey: xxxxxx" "https://api.elsevier.com/content/article/pii/S0950584924002593" 
+            pattern = r'/pii/([A-Z0-9]+)'
+
+            match = re.search(pattern, url)
+            if match:
+                pii = match.group(1)
+                api_url = 'https://api.elsevier.com/content/article/pii/'+ pii + "?httpAccept=application/json"
+                elsevier_data = requests.get(api_url, headers = {"x-els-apikey":config.sciencedirect_key}).json()
+                # print("elsevier_data",pii,json.dumps(elsevier_data, indent=2))
+                if "full-text-retrieval-response" in elsevier_data:
+                    venue_title = elsevier_data["full-text-retrieval-response"]["coredata"]["prism:publicationName"]
+                    doi = elsevier_data["full-text-retrieval-response"]["coredata"]["prism:doi"]
+                    title = elsevier_data["full-text-retrieval-response"]["coredata"]["dc:title"]
+                    abstract = elsevier_data["full-text-retrieval-response"]["coredata"]["dc:description"]
+                    url = url.replace('?dgcid=rss_sd_all','')
+                    author_list = []
+                    for x in elsevier_data["full-text-retrieval-response"]["coredata"]["dc:creator"]:
+                        author_list.append(x["$"])
+                    authors = ", ".join(author_list)
+                    # print(authors)
+                # print(elsevier_data)
+                # note the abstract is not available in the free version of the API
+                # author = " and ".join([x["$"] for x in elsevier_data["full-text-retrieval-response"]["coredata"]["dc:creator"]])
+                # example curl -H "Accept: application/json" -H "x-els-apikey: xxxxxx" "https://api.elsevier.com/content/article/pii/S0950584924002593" 
+                # print('curl -H "Accept: application/json" -H "x-els-apikey: xxxxxx" "https://api.elsevier.com/content/article/pii/'+pii)
+                # now get on kth network via SSH, Socks or HTTP proxy
+            
+            # must be done from the kth network, so through SSH or proxy, unclear whether it's actually the case
+            # print("implement doi retrieval for sciencedirect")
+            pass
+
+        if "ieeexplore.ieee.org" in url:
+            # special case
+            url = url.replace("/figures#figures","")
+
+            # rate limit see https://developer.ieee.org/API_Terms_of_Use2
+            # not documented in response headers
+            # rate limit on https://developer.ieee.org/apps/myapis
+            #  10 Calls per second / 200 Calls per day
+            # we can also get tldr for ieee papers
+            if "abs_all.jsp" in url:
+                # parse url
+                components = urllib.parse.urlparse(url)
+                qdict = urllib.parse.parse_qs(components.query)
+                ieeeid = qdict["arnumber"][0]
+                # print(qdict)
+            else:
+                ieeeid = [x for x in url.split("/") if len(x)>0][-1].replace(".pdf","")
+            # curl "https://ieeexploreapi.ieee.org/api/v1/search/articles?apiKey=XXXXXX&article_number=10833642"
+
+            req_url = "https://ieeexploreapi.ieee.org/api/v1/search/articles?article_number="+ieeeid+"&apiKey="+config.ieeexplore_key
+            resp = requests.get(req_url)
+            if resp.status_code != 418: # i'm a teapot, WTF?
+                # print(resp.text)
+                try:
+                    ieeedata = resp.json()
+                except Exception as e:
+                    return None
+                    raise Exception("ieee error",resp.status_code,resp.text, resp.headers)
+                    
+                if "error" not in ieeedata and "articles" in ieeedata:
+                    if "doi" in ieeedata["articles"][0]:
+                        doi = ieeedata["articles"][0]["doi"]
+                    venue_title = ieeedata["articles"][0]["publication_title"]
+                    abstract = ieeedata["articles"][0]["abstract"] if "abstract" in  ieeedata["articles"][0] else ""
+                    # print ([x for x in ieeedata["articles"][0]["authors"]["authors"]])
+                    # args the ["authors"]["authors"], bad data model
+                    author_list = [x["full_name"] for x in ieeedata["articles"][0]["authors"]["authors"]]
+                    authors = ", ".join([x["full_name"] for x in ieeedata["articles"][0]["authors"]["authors"]])
+                    title = ieeedata["articles"][0]["title"]                
+                    # semanticscholarid="doi:"+doi
+                else: print("no data in ieee "+json.dumps(ieeedata, indent=2))
+
+        if "semanticscholar.org/" in url:
+            return collect_paper_data_from_semanticscholar(url)
+
+        if "mdpi.com/" in url:
+            return collect_paper_data_from_mdpi(url)
+
+        if "openreview.net/" in url:
+            return collect_paper_data_from_openreview(url)
+
+        if "preprints.org/" in url:
+            return collect_paper_data_from_preprints_org(url)
+
+        if title == None:
+            # default from Zotero Translation Server
+            zotero_data = get_zotero_translator_service_url(url)
+            if zotero_data != None and len(zotero_data)>0:
+                return transform_zotero_to_output(zotero_data)
+                
+        return {
+            "url":url,
+            "title":title,
+            "semanticscholarid":semanticscholarid,
+            "abstract":abstract,
+            "tldr": tldr,
+            "authors": authors,
+            "author_list": author_list,
+            "venue_title" : venue_title,
+            "doi" : doi,
+            "year" : year,
+            "note" : note
+        }
+    except Exception as e:
+        print(f"Error collecting paper data from URL {url}: {e}")
+        log_problem_cases(url, log_file_path="cache/urls-with-runtime-errors.jsonl")
+        return None
 
 def collect_paper_data_from_mdpi(url):
     """
