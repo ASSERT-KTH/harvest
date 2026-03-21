@@ -3524,8 +3524,8 @@ def notify_for_all_keyword(keyword):
             if keyword in paper.categories:
                 paper.reason = "title match"
             
-                # Send email notification
-                notify_email(paper, service)
+                ## notify_email(paper, service) # don't sendemail, we discuss in meetings
+
                 os.remove(filepath)
                 notified_count += 1
                 
