@@ -3483,6 +3483,67 @@ def collect_and_send_email(url):
     notify_email(paper, service)
 
 
+def notify_10_last_author_alerts():
+    """
+    Read the harvested cache, select the 10 most recent author alerts, and send notifications.
+
+    python -c "import harvest; harvest.notify_10_last_author_alerts()"
+    """
+    service = build('gmail', 'v1', http=get_creds().authorize(Http()))
+
+    harvest_dir = "/home/martin/workspace/scholar-harvest/cache/harvest/"
+    harvest_files = glob.glob(os.path.join(harvest_dir, "*.json"))
+    print(f"Found {len(harvest_files)} harvested papers")
+
+    author_alerts = []
+    read_count = 0
+    error_count = 0
+
+    for filepath in harvest_files:
+        try:
+            with open(filepath, "r") as f:
+                paper_data = json.load(f)
+            read_count += 1
+
+            reason = paper_data.get("reason", "")
+            if not isinstance(reason, str) or not reason.startswith("author_alert:"):
+                continue
+
+            timestamp_value = paper_data.get("timestamp") or paper_data.get("detection_date")
+            if timestamp_value:
+                try:
+                    sort_key = datetime.fromisoformat(timestamp_value)
+                except ValueError:
+                    sort_key = datetime.fromtimestamp(os.path.getmtime(filepath))
+            else:
+                sort_key = datetime.fromtimestamp(os.path.getmtime(filepath))
+
+            author_alerts.append((sort_key, filepath, paper_data))
+        except Exception as exc:
+            error_count += 1
+            print(f"Error processing {filepath}: {exc}")
+
+    author_alerts.sort(key=lambda item: item[0], reverse=True)
+    selected_alerts = author_alerts[:10]
+
+    notified_count = 0
+    for _, _, paper_data in selected_alerts:
+        paper = Paper(paper_data.get("url", ""), paper_data.get("title", ""))
+        transfer_data_from_dict_to_paper(paper, paper_data)
+        paper.reason = paper_data.get("reason", "")
+        paper.categories = paper_data.get("categories", [])
+        paper.category = paper_data.get("category", paper.category)
+        paper.detection_date = paper_data.get("detection_date", paper.detection_date)
+        notify_email(paper, service)
+        notified_count += 1
+
+    print(f"Read {read_count} harvested papers")
+    print(f"Found {len(author_alerts)} author alerts")
+    print(f"Notified {notified_count} recent author alerts")
+    if error_count > 0:
+        print(f"Encountered {error_count} errors while processing harvested papers")
+
+
 
 def notify_for_all_keyword(keyword):
     """
