@@ -708,7 +708,7 @@ def create_harvest_email_paper(paper, service, **kwargs):
     if already_seen(paper):
         return False
     
-    paper_data = collect_paper_data_from_url_with_cache(paper.url)
+    paper_data = collect_paper_data_from_url_with_cache(paper.url, reason=paper.print_reason())
     
     # logging cases where no metadata is available
     if not paper_data or paper_data["title"] == None or paper_data["title"] == "":
@@ -812,7 +812,7 @@ def collect_paper_data_from_doi(doi):
     assert len(doi)>0
     return collect_paper_data_from_url(get_doi_target(doi))
 
-def collect_paper_data_from_url_with_cache(url):
+def collect_paper_data_from_url_with_cache(url, reason=None):
     urlseen, thepath = already_seen_url(url,"/home/martin/workspace/scholar-harvest/cache/harvest/")
     if urlseen:
         with open(thepath, "r") as f:
@@ -844,6 +844,8 @@ def collect_paper_data_from_url_with_cache(url):
                 os.remove(thepath)
             return None
         if data["title"] and len(data["title"])>0:
+            if reason:
+                data["reason"] = reason
             print("\033[92m✔\033[0mgood, writing cache for ", data["title"], url)
             
             with open(thepath, "w") as f:
