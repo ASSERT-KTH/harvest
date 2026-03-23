@@ -1156,7 +1156,7 @@ def collect_paper_data_from_arxiv(url):
             "year": year
         }
     except Exception as e:
-        print("error fetching arxiv metadata for "+url, e)
+        print("error fetching arxiv metadata for ", theurl, url, e)
         return None
 
 def collect_paper_data_from_diva(url):
