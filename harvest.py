@@ -2435,7 +2435,8 @@ def collect_paper_data_from_dblp(url):
 
 def collect_paper_data_from_openreview(url):
     """
-    Extract metadata from an OpenReview URL using the OpenReview public API.
+    Extract metadata from an OpenReview URL using the openreview-py client.
+    Requires OPENREVIEW_USERNAME and OPENREVIEW_PASSWORD secrets.
     Returns a dict with keys similar to other collectors:
     {url, title, semanticscholarid, abstract, tldr, authors, venue_title, doi, note, year}
 
@@ -2443,6 +2444,8 @@ def collect_paper_data_from_openreview(url):
 
     python -c "import harvest; print(harvest.collect_paper_data_from_openreview('https://openreview.net/pdf?id=BCS7HHInC2'))"
     """
+    import openreview
+
     # extract id from query or path
     parsed = urlparse(url)
     q = urllib.parse.parse_qs(parsed.query)
@@ -2461,11 +2464,16 @@ def collect_paper_data_from_openreview(url):
     if not forum_id:
         return None
 
-    api_url = f"https://api2.openreview.net/notes?forum={forum_id}"
-    resp = requests.get(api_url, timeout=10)
-    if resp.status_code != 200:
-        raise Exception(f"OpenReview API error {resp.status_code} for forum {forum_id}")
-    data = resp.json()
+    import keyring
+    username = keyring.get_password('openreview', 'username')
+    password = keyring.get_password('openreview', username) if username else None
+    client = openreview.api.OpenReviewClient(
+        baseurl='https://api2.openreview.net',
+        username=username,
+        password=password,
+    )
+    notes = client.get_notes(forum=forum_id)
+    data = {'notes': [n.to_json() for n in notes]}
 
     # print("OpenReview API response", json.dumps(data, indent=2)) # debug
 

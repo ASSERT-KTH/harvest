@@ -48,8 +48,8 @@ def extract_titles_from_md(path):
     return titles
 
 
-def avg_embedding(titles):
-    """Return the average embedding vector for a list of titles."""
+def get_ref_embeddings(titles):
+    """Return a list of embedding vectors for a list of titles."""
     vectors = []
     for title in titles:
         result = get_embedding_and_push_to_db(title)
@@ -57,9 +57,7 @@ def avg_embedding(titles):
             vectors.append(result["embedding"]["vector"])
         else:
             print(f"  [skip] no embedding for: {title}", file=sys.stderr)
-    if not vectors:
-        return None
-    return np.mean(vectors, axis=0).tolist()
+    return vectors
 
 
 def cosine_similarity(a, b):
@@ -75,12 +73,13 @@ def main():
     titles = extract_titles_from_md(ML_ON_CODE_MD)
     print(f"Resolved {len(titles)} titles from URLs in ml-on-code.md", file=sys.stderr)
 
-    # Step 2: compute average embedding
-    print("Computing average embedding...", file=sys.stderr)
-    ref_vector = avg_embedding(titles)
-    if ref_vector is None:
-        print("Error: could not compute reference embedding", file=sys.stderr)
+    # Step 2: collect reference embeddings
+    print("Collecting reference embeddings...", file=sys.stderr)
+    ref_vectors = get_ref_embeddings(titles)
+    if not ref_vectors:
+        print("Error: could not compute any reference embedding", file=sys.stderr)
         sys.exit(1)
+    print(f"Got {len(ref_vectors)} reference embeddings", file=sys.stderr)
 
     # Step 3: score each paper in toread
     toread_files = glob.glob(TOREAD_DIR + "*")
@@ -98,7 +97,8 @@ def main():
             result = get_embedding_and_push_to_db(title)
             if not result or not result.get("embedding") or not result["embedding"].get("vector"):
                 continue
-            score = cosine_similarity(ref_vector, result["embedding"]["vector"])
+            vec = result["embedding"]["vector"]
+            score = min(cosine_similarity(rv, vec) for rv in ref_vectors)
             scored.append((score, title, url))
         except Exception as e:
             print(f"Error processing {filepath}: {e}", file=sys.stderr)
