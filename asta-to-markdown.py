@@ -126,14 +126,14 @@ def to_markdown(query: str, papers: list[dict], asta_url: str) -> str:
     lines.append(f"Total papers: {len(papers)}")
     lines.append("")
 
-    for i, p in enumerate(papers, 1):
+    for p in papers:
         title = p.get("paperTitle") or p.get("title") or "(untitled)"
         year = p.get("paperYear") or ""
         venue = p.get("venue") or ""
         url = p.get("url") or p.get("s2_url") or ""
         abstract = p.get("abstract") or ""
 
-        header = f"## {i}. {title}"
+        header = f"## {title}"
         if year:
             header += f" ({year})"
         lines.append(header)
