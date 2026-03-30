@@ -699,7 +699,11 @@ def create_harvest_email_paper(paper, service, **kwargs):
     if "https://scholar.google" in paper.url:
         # the paper will appear formally later
         return False
-    assert paper.url.startswith("http")
+    if paper.url.startswith("ftp://"):
+        # yes, no kidding there are still some papers on FTP
+        # March 2026 ftp://prog.vub.ac.be/tech_report/2026/vub-tr-soft-26-02.pdf
+        return False
+    assert paper.url.startswith("http"), paper.url
 
     origin = ""
     if "origin" in kwargs: origin = kwargs["origin"]
@@ -2298,7 +2302,7 @@ def collect_paper_data_from_preprints_org(url):
         dict: Paper metadata including title, authors, abstract, doi, etc.
         
     Example:
-        python -c "import harvest; print(harvest.collect_paper_data_from_preprints_org('https://www.preprints.org/manuscript/202401.1234/v1'))"
+        python -c "import harvest; print(harvest.collect_paper_data_from_preprints_org('https://www.preprints.org/frontend/manuscript/1170d6515defda71d538b3a95fc91ccc/download_pub'))"
     """
     title = None
     authors = ""
