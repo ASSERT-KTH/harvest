@@ -97,12 +97,18 @@ def list_most_related_papers_to_monperrus_research():
     toread_dir = Path('cache/toread')
     toread_papers = []
     
+    current_year = 2026
+    min_year = current_year - 3
+
     for paper_file in toread_dir.glob('*.json'):
         try:
             with open(paper_file, 'r') as f:
                 paper_data = json.load(f)
                 title = paper_data.get('title', '')
                 # print(title)
+                year = paper_data.get('year')
+                if year and int(year) < min_year:
+                    continue
                 if title:
                     embedding_data = semanticscholar_lib.get_embedding_and_push_to_db(title, verbose=False)
                     # print(embedding_data)
