@@ -166,40 +166,49 @@ CLASSIFICATION_DATA = {
         "enter the hydra",
         "gigahorse",
     ],
-    "LLM on code": [
-        "learn",
-        "llm",
-        "neural",
-        "predict",
-        "generative",
-        "transformer",
-        "prompt",
-        "embedding",
-        "representation",
-        "fine-tun",
-        "summar",
-        "incoder",
-        "codet5",
+    "LLM - Code Models": [
         "code llama",
         "codellama",
         "code-llama",
-        "octopack",
-        "learning performance-improving",
-        "neural code",
+        "codet5",
+        "incoder",
         "model of code",
         "models of code",
         "models for code",
-        "trained on code",
-        "AI code",
         "models of source code",
+        "trained on code",
+        "ai code",
         "python-state-changes",  # dataset
-        "translat",
-        "language model",
-        "pre-training",
-        "toolformer",
-        "jigsaw",
+    ],
+    "LLM - Prompting and Agents": [
+        "prompt",
         "langchain",
-        "talm",
+        "toolformer",
+        "agentic",
+        "llm agent",
+        "llm-based agent",
+    ],
+    "LLM - Foundations": [
+        "language model",
+        "llm",
+        "transformer",
+        "pre-training",
+        "fine-tun",
+        "embedding",
+        "representation",
+    ],
+    "Generative AI": [
+        "generative",
+    ],
+    "Machine Learning": [
+        "learn",
+        "neural",
+        "predict",
+        "summar",
+        "translat",
+        "octopack",
+        "learning performance-improving",
+        "neural code",
     ],
     "Testing": ["test", "oracle", "metamorphic", "mutant"],
     "Reliability": [
@@ -3133,7 +3142,7 @@ def notify_followers(paper, email_html_body):
     #     res = service.users().messages().send(userId='me', body={
     #         'raw': base64.urlsafe_b64encode((header + email).replace('<martin.monperrus@gmail.com>','<monperrus@kth.se>,<xppcoder@gmail.com>,<benoit.baudry@umontreal.ca>').encode("utf-8")).decode("utf-8")
     #         }).execute()
-    if paper.category.lower() == "LLM on code".lower():
+    if paper.category.lower().startswith("llm -"):
         # send_email("[harvest] new paper about "+paper.category, email_html_body,"markus.borg@codescene.com,postmaster@monperrus.net")
         pass
 
@@ -4030,9 +4039,6 @@ def notify_for_all_keyword(keyword):
     service = build("gmail", "v1", http=get_creds().authorize(Http()))
 
     toread_dir = "/home/martin/workspace/scholar-harvest/cache/toread/"
-    smart_contract_keywords = [
-        kw.lower() for kw in CLASSIFICATION_DATA["Smart contracts"]
-    ]
 
     # Get all files in toread
     toread_files = glob.glob(toread_dir + "*")
@@ -4041,6 +4047,13 @@ def notify_for_all_keyword(keyword):
     notified_count = 0
     skipped_count = 0
     error_count = 0
+    keyword_breakdown = Counter()
+
+    keyword_normalized = keyword.strip().lower()
+    if keyword_normalized == "llm on code":
+        keyword_aliases = {"llm on code"}
+    else:
+        keyword_aliases = {keyword_normalized}
 
     for filepath in toread_files:
         try:
@@ -4048,17 +4061,32 @@ def notify_for_all_keyword(keyword):
             with open(filepath, "r") as f:
                 paper_data = json.load(f)
 
-            title = paper_data.get("title", "").lower()
-
             # Create Paper object and restore data
             paper = Paper(paper_data.get("url", ""), paper_data.get("title", ""))
             transfer_data_from_dict_to_paper(paper, paper_data)
 
             # Compute categories using keywords
-            paper.categories = [x[1] for x in compute_category_keywords_paper(paper)]
+            category_matches = compute_category_keywords_paper(paper)
+            paper.categories = [x[1] for x in category_matches]
+            
+            llm_categories = [c for c in paper.categories if c.lower().startswith("llm -")]
+            if llm_categories:
+                print(
+                    f"Paper '{paper.desc}' categorized as {llm_categories} based on keywords: {[x[0] for x in category_matches]}"
+                )
 
-            # Check if paper has reason
-            if keyword in paper.categories:
+
+            for x in paper.categories:
+                keyword_breakdown[x] += 1
+
+            # Backward compatibility: old keyword "LLM on code" matches all fine-grained LLM categories.
+            category_lowers = {c.lower() for c in paper.categories}
+            if keyword_normalized == "llm on code":
+                should_notify = any(c.startswith("llm -") for c in category_lowers)
+            else:
+                should_notify = any(c in keyword_aliases for c in category_lowers)
+
+            if should_notify:
                 paper.reason = "title match"
 
                 ## notify_email(paper, service) # don't sendemail, we discuss in meetings
@@ -4079,6 +4107,12 @@ def notify_for_all_keyword(keyword):
     print(f"  Notified ({keyword}): {notified_count}")
     print(f"  Skipped (no keywords): {skipped_count}")
     print(f"  Errors: {error_count}")
+    print(f"  Breakdown per keyword:")
+    if keyword_breakdown:
+        for pattern, count in keyword_breakdown.most_common():
+            print(f"    {pattern}: {count}")
+    else:
+        print("    No matches found")
 
 
 def notify_for_all_categorized_papersto_read():
