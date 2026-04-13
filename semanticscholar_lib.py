@@ -853,7 +853,7 @@ def paperId_to_bibtex(paperId):
     """
     python -c "from semanticscholar_lib import paperId_to_bibtex; print(paperId_to_bibtex('38f382ed157cd187d28e14c3eac36e3bed34071e'))"
     """
-    url = f"https://api.semanticscholar.org/graph/v1/paper/{paperId}?fields=citationStyles,abstract"
+    url = f"https://api.semanticscholar.org/graph/v1/paper/{paperId}?fields=citationStyles,abstract,externalIds"
     response = requests.get(url, headers={"x-api-key": config.semanticscholar_key})
     # {"paperId": "38f382ed157cd187d28e14c3eac36e3bed34071e", "citationStyles": {"bibtex": "@Article{Silva2024RepairBenchLO,\n author = {Andr\u00e9 Silva and Monperrus Martin},\n booktitle = {2025 IEEE/ACM International Workshop on Large Language Models for Code (LLM4Code)},\n journal = {2025 IEEE/ACM International Workshop on Large Language Models for Code (LLM4Code)},\n pages = {9-16},\n title = {RepairBench: Leaderboard of Frontier Models for Program Repair},\n year = {2024}\n}\n"}}
     response.raise_for_status()
@@ -896,12 +896,15 @@ def snippet_search_bibtex(query):
     result = []
     for snippet in snippets["data"]:
         paper = paperId_to_bibtex("CorpusId:" + snippet["paper"]["corpusId"])
+        doi = paper.get("externalIds", {}).get("DOI", "")
         entry = {
             "title": snippet["paper"]["title"],
             "abstract": paper.get("abstract", ""),
             "snippet": snippet["snippet"]["text"],
             "bibtex": latex_sanitize(paper["citationStyles"]["bibtex"]),
         }
+        if doi:
+            entry["doi"] = doi
         result.append(entry)
 
     data = yaml.dump(
