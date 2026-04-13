@@ -923,7 +923,31 @@ def is_high_reputation(url):
 
 def collect_paper_data_from_doi(doi):
     assert len(doi) > 0
-    return collect_paper_data_from_url(get_doi_target(doi))
+    doi_url = f"https://doi.org/{doi}"
+    try:
+        return collect_paper_data_from_url(get_doi_target(doi))
+    except requests.RequestException:
+        zotero_data = get_zotero_translator_service_url(doi_url)
+        paper_data = transform_zotero_to_output(zotero_data) if zotero_data else None
+        if paper_data and not paper_data.get("tldr", "").strip():
+            paper_data["tldr"] = ""
+        crossref_data = info_from_crossref(doi)
+        if paper_data:
+            return merge_paper_data(paper_data, crossref_data)
+        return crossref_data
+
+
+def merge_paper_data(primary_data, fallback_data):
+    if not primary_data:
+        return fallback_data
+    if not fallback_data:
+        return primary_data
+
+    merged = dict(primary_data)
+    for key, value in fallback_data.items():
+        if merged.get(key) in (None, "", [], {}):
+            merged[key] = value
+    return merged
 
 
 def collect_paper_data_from_url_with_cache(url, reason=None):
@@ -2718,10 +2742,25 @@ def collect_paper_data_from_dblp(url):
         # print(dblp_url)
 
         dblp_resp = requests.get(dblp_url)
+        dblp_resp.raise_for_status()
         # print(dblp_url, dblp_resp.status_code, dblp_resp.text) # debug
         dblp_metadata = dblp_resp.json()
         venue_title = dblp_metadata["venue_title"]
-        authors = ", ".join(dblp_metadata["author"])
+        author_list = [author.replace(" 0001", "").strip() for author in dblp_metadata["author"]]
+        authors = ", ".join(author_list)
+        paper_data = {
+            "url": url,
+            "title": dblp_metadata["title"].rstrip("."),
+            "semanticscholarid": "",
+            "abstract": "",
+            "tldr": "",
+            "authors": authors,
+            "author_list": author_list,
+            "venue_title": venue_title,
+            "doi": None,
+            "year": dblp_metadata.get("year"),
+            "note": None,
+        }
         # print(dblp_metadata)
         # DOI Chain from dblp
         if "ee" in dblp_metadata and len(dblp_metadata["ee"]) > 0:
@@ -2732,10 +2771,17 @@ def collect_paper_data_from_dblp(url):
                     .replace("https://doi.org/", "")
                     .replace("https://dx.doi.org/", "")
                 )
-                return collect_paper_data_from_doi(doi)
+                paper_data["doi"] = doi
+                crossref_data = info_from_crossref(doi)
+                if crossref_data and crossref_data.get("url"):
+                    direct_data = collect_paper_data_from_url(crossref_data["url"])
+                    if direct_data:
+                        return merge_paper_data(direct_data, paper_data)
+                return merge_paper_data(collect_paper_data_from_doi(doi), paper_data)
         # if "doi.org" in dblp_metadata["ee"]:
         #     url = get_doi_target(dblp_metadata["ee"])
         # print("TODO implement DOI and chain for DBLP")
+        return paper_data
     except Exception as e:
         print(f"collect_paper_data_from_dblp {dblp_url}")  # debug
         print("Error in collect_paper_data_from_dblp", e)
