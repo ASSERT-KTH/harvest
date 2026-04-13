@@ -2,8 +2,10 @@
 
 from harvest import *
 import os
+import importlib.util
 from pathlib import Path
 import json
+from functools import lru_cache
 
 import numpy as np
 from pathlib import Path
@@ -21,6 +23,68 @@ def cosine_similarity(v1, v2):
 def get_title_hash(title):
     """Get hash of title for cache lookup"""
     return hashlib.sha256(title.encode("utf-8")).hexdigest()
+
+
+@lru_cache(maxsize=1)
+def get_title_to_issue_module():
+    script_path = Path(__file__).with_name("title-to-issue.py")
+    spec = importlib.util.spec_from_file_location("title_to_issue_script", script_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Unable to load matcher from {script_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@lru_cache(maxsize=1)
+def get_related_work_issues():
+    return get_title_to_issue_module().load_issues()
+
+
+def get_related_work_matches(title, limit=2):
+    matcher = get_title_to_issue_module()
+    return matcher.match_title_to_issues(title, get_related_work_issues(), limit=limit)
+
+
+def format_related_work_recommendation(title, limit=2):
+    matcher = get_title_to_issue_module()
+    matches = get_related_work_matches(title, limit=limit)
+    if not matches:
+        return f"No quick related-work issue match found in {matcher.REPO_URL}"
+
+    label = "Recommended related-work issue"
+    if len(matches) > 1:
+        label += "s"
+
+    lines = [label + ":"]
+    for match in matches:
+        lines.append(f"- #{match.number} {match.title}")
+        lines.append(f"  {match.url}")
+    return "\n".join(lines)
+
+
+def format_closest_related_work_issue(title):
+    matches = get_related_work_matches(title, limit=1)
+    if not matches:
+        return None
+    match = matches[0]
+    return f"Closest related-work issue: #{match.number} {match.title}\n{match.url}"
+
+
+def format_ranked_paper_preview(result, index):
+    lines = [
+        f"{index}. [{result['angle']:.4f}] {result['data']['title']}",
+        f"Venue: {result['data']['venue_title']}",
+        f"URL: {result['data']['url']}",
+        f"Authors: {result['data']['authors'][:100]}...",
+    ]
+    if result["data"].get("tldr"):
+        lines.append(f"TLDR: {result['data']['tldr']}")
+    lines.append(f"Most similar to: {result['most_similar_to']}")
+    closest_issue = format_closest_related_work_issue(result["data"]["title"])
+    if closest_issue:
+        lines.append(closest_issue)
+    return "\n".join(lines)
 
 
 def process_monperrus_bib():
@@ -59,7 +123,7 @@ def process_monperrus_bib():
     return titles, paperIds
 
 
-def list_most_related_papers_to_monperrus_research():
+def list_most_related_papers_to_monperrus_research(preview_limit=10):
     """
     python -c "from dl_monperrus_paper import list_most_related_papers_to_monperrus_research; list_most_related_papers_to_monperrus_research()"
 
@@ -214,14 +278,10 @@ def list_most_related_papers_to_monperrus_research():
     print(f"Papers in toread ranked by similarity to Monperrus research")
     print(f"{'=' * 100}\n")
 
-    for i, result in enumerate(results, 1):  # Show top 10 results
-        if i > 10:
+    for i, result in enumerate(results, 1):
+        if i > preview_limit:
             break
-        print(f"{i}. [{result['angle']:.4f}] {result['data']['title']}")
-        print(f"   Most similar to: {result['most_similar_to']}")
-        print(f"   Venue: {result['data']['venue_title']}")
-        print(f"   URL: {result['data']['url']}")
-        print(f"   Authors: {result['data']['authors'][:100]}...")
+        print(format_ranked_paper_preview(result, i))
         print()
 
     return results
@@ -234,7 +294,7 @@ def notify_most_related_papers_to_monperrus_research(N=10):
     for the most 10 related papers to monperrus research send an email notification
     """
     # Get the ranked list of related papers
-    results = list_most_related_papers_to_monperrus_research()
+    results = list_most_related_papers_to_monperrus_research(preview_limit=N)
 
     if not results:
         print("No results to notify")
@@ -243,13 +303,11 @@ def notify_most_related_papers_to_monperrus_research(N=10):
     # Take top N most related papers (lowest cosine distance)
     top_papers = results[:N]
 
-    print(f"\nSending email notifications for top {len(top_papers)} papers...")
-
     # Get Gmail service credentials
     service = build("gmail", "v1", http=get_creds().authorize(Http()))
 
     # Send notification for each paper
-    for i, result in enumerate(top_papers, 1):
+    for result in top_papers:
         try:
             # Create Paper object
             paper = Paper(result["data"]["url"], result["data"]["title"])
@@ -259,9 +317,8 @@ def notify_most_related_papers_to_monperrus_research(N=10):
             paper.authors = result["data"]["authors"]
             paper.reason = f"Related to Monperrus research (angle: {result['angle']:.4f}, most similar to: {result['most_similar_to']})"
             paper.tldr = result["data"].get("tldr", "")
+            paper.note = format_related_work_recommendation(result["data"]["title"])
 
-            # Create and send email
-            print(f"{i}. Notifying: {result['data']['title'][:80]}...")
             notify_email(paper, service)
 
             # deleting the file to avoid sending multiple notifications for the same paper
@@ -271,8 +328,6 @@ def notify_most_related_papers_to_monperrus_research(N=10):
         except Exception as e:
             print(f"   Error sending notification for '{result['title'][:50]}...': {e}")
             continue
-
-    print(f"\nCompleted sending {len(top_papers)} notifications")
 
 
 def main():
