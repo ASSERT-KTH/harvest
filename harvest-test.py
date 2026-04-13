@@ -109,7 +109,7 @@ def test_collect_paper_data_from_doi():
     assert isinstance(paper_data, dict)
     # assert paper_data['url'] == url
     assert paper_data['title'] == 'ITER: Iterative Neural Repair for Multi-Location Patches'
-    assert paper_data['authors'] == 'He Ye, Martin Monperrus'
+    assert paper_data['authors'] == 'H. Ye, Martin Monperrus'
     assert paper_data['venue_title'] == "ICSE '24: IEEE/ACM 46th International Conference on Software Engineering"
     assert paper_data['doi'] == '10.1145/3597503.3623337'
     assert paper_data['year'] == 2024
