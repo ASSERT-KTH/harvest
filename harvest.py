@@ -4117,9 +4117,8 @@ def notify_for_all_keyword(keyword):
             
             llm_categories = [c for c in paper.categories if c.lower().startswith("llm -")]
             if llm_categories:
-                print(
-                    f"Paper '{paper.desc}' categorized as {llm_categories} based on keywords: {[x[0] for x in category_matches]}"
-                )
+                # Debug output removed to avoid printing 'Paper' lines for notifications
+                pass
 
 
             for x in paper.categories:
@@ -4140,7 +4139,7 @@ def notify_for_all_keyword(keyword):
                 os.remove(filepath)
                 notified_count += 1
 
-                print(f"* {paper.desc} {paper.url}")
+                print(f"* {paper.desc} — {paper.venue_title} {paper.url}")
             else:
                 skipped_count += 1
 
