@@ -5,6 +5,7 @@ import urllib.parse
 
 import requests
 from lxml import html
+from requests import RequestException
 
 
 USER_AGENT = "scholar-harvest/0.1.0 (wikipedia-citoid-harvest.py)"
@@ -50,12 +51,22 @@ def fetch_citoid_record(identifier):
 
 
 def fetch_quote(url):
-    response = requests.get(
-        url,
-        headers={"User-Agent": USER_AGENT},
-        timeout=30,
-    )
-    response.raise_for_status()
+    try:
+        response = requests.get(
+            url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (X11; Linux x86_64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/135.0.0.0 Safari/537.36"
+                )
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+    except RequestException:
+        return None
+
     tree = html.fromstring(response.content)
 
     for xpath in (
