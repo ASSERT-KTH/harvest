@@ -1,83 +1,82 @@
 #!/usr/bin/env python3
 
+from datetime import date
+import re
 import sys
-import urllib.parse
 
+import harvest
 import requests
-from lxml import html
-from requests import RequestException
 
 
 USER_AGENT = "scholar-harvest/0.1.0 (wikipedia-citoid-harvest.py)"
-CITOID_ENDPOINT = "https://en.wikipedia.org/api/rest_v1/data/citation/zotero/{identifier}"
-
-ITEM_TYPE_TO_TEMPLATE = {
-    "journalArticle": "cite journal",
-    "newspaperArticle": "cite news",
-    "magazineArticle": "cite magazine",
-    "webpage": "cite web",
-    "blogPost": "cite web",
-    "forumPost": "cite web",
-    "book": "cite book",
-    "bookSection": "cite book",
-    "conferencePaper": "cite conference",
-    "report": "cite report",
-    "thesis": "cite thesis",
-}
-
-PUBLICATION_FIELD_BY_TYPE = {
-    "journalArticle": "journal",
-    "newspaperArticle": "newspaper",
-    "magazineArticle": "magazine",
-    "webpage": "website",
-    "blogPost": "website",
-    "forumPost": "website",
-    "conferencePaper": "conference",
-}
 
 
-def fetch_citoid_record(identifier):
-    encoded_identifier = urllib.parse.quote(identifier.strip(), safe="")
+def normalize_identifier(identifier):
+    identifier = identifier.strip()
+    if identifier.startswith(("http://", "https://")):
+        return identifier, identifier
+    return identifier, f"https://doi.org/{identifier}"
+
+
+def clean_doi(value):
+    if not value:
+        return None
+    value = value.strip()
+    value = value.replace("https://doi.org/", "").replace("http://doi.org/", "")
+    return value or None
+
+
+def extract_doi(identifier, paper_data):
+    if paper_data and paper_data.get("doi"):
+        return clean_doi(paper_data["doi"])
+    if identifier.startswith(("http://", "https://")):
+        match = re.search(r"10\.\S+/\S+", identifier)
+        if match:
+            return clean_doi(match.group(0))
+        return None
+    return clean_doi(identifier)
+
+
+def fetch_crossref_message(doi):
+    if not doi:
+        return None
     response = requests.get(
-        CITOID_ENDPOINT.format(identifier=encoded_identifier),
+        f"https://api.crossref.org/works/{doi}",
         headers={"User-Agent": USER_AGENT},
         timeout=30,
     )
-    response.raise_for_status()
-    records = response.json()
-    if not records:
-        raise ValueError(f"No Citoid metadata found for {identifier}")
-    return records[0]
-
-
-def fetch_quote(url):
-    try:
-        response = requests.get(
-            url,
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (X11; Linux x86_64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/135.0.0.0 Safari/537.36"
-                )
-            },
-            timeout=30,
-        )
-        response.raise_for_status()
-    except RequestException:
+    if response.status_code != 200:
         return None
+    return response.json().get("message")
 
-    tree = html.fromstring(response.content)
 
-    for xpath in (
-        '//meta[@property="og:description"]/@content',
-        '//meta[@name="citation_abstract"]/@content',
-        '//meta[@name="description"]/@content',
-    ):
-        values = tree.xpath(xpath)
-        if values:
-            return " ".join(values[0].split())
+def normalize_date(value):
+    if not value:
+        return None
+    if isinstance(value, list):
+        parts = [str(part) for part in value if part]
+    else:
+        parts = str(value).split("-")
+    if len(parts) >= 2:
+        parts[1] = parts[1].zfill(2)
+    if len(parts) >= 2:
+        return "-".join(parts[:2])
+    return parts[0] if parts else None
 
+
+def normalize_pages(value):
+    if not value:
+        return None
+    return re.sub(r"(?<=\d)-(?=\d)", "–", value)
+
+
+def crossref_date(message):
+    if not message:
+        return None
+    for key in ("published-print", "published-online", "published", "issued"):
+        parts = message.get(key, {}).get("date-parts", [[]])[0]
+        if parts:
+            return normalize_date(parts)
     return None
 
 
@@ -91,13 +90,53 @@ def pick_issn(value):
     return issns[-1] if issns else None
 
 
-def normalize_date(value):
+def normalize_name_case(value):
     if not isinstance(value, str):
         return value
-    parts = value.split("-")
-    if len(parts) == 3 and all(part.isdigit() for part in parts):
-        return "-".join(parts[:2])
-    return value
+    return value.title() if value.isupper() else value
+
+
+def split_author_name(name):
+    name = name.strip()
+    if not name:
+        return None, None
+    if "," in name:
+        parts = [part.strip() for part in name.split(",", 1)]
+        if len(parts) == 2:
+            return parts[1] or None, parts[0] or None
+    tokens = name.split()
+    if len(tokens) == 1:
+        return None, tokens[0]
+    return " ".join(tokens[:-1]), tokens[-1]
+
+
+def author_entries(paper_data, crossref_message):
+    if crossref_message and crossref_message.get("author"):
+        entries = []
+        for author in crossref_message["author"]:
+            entries.append(
+                {
+                    "first": normalize_name_case(author.get("given", "")) or None,
+                    "last": normalize_name_case(author.get("family", "")) or None,
+                }
+            )
+        return entries
+
+    if paper_data and paper_data.get("author_list"):
+        names = paper_data["author_list"]
+    else:
+        authors = paper_data.get("authors", "") if paper_data else ""
+        if " | " in authors:
+            names = [name.strip() for name in authors.split(" | ") if name.strip()]
+        else:
+            names = [name.strip() for name in authors.split(", ") if name.strip()]
+
+    entries = []
+    for name in names:
+        first_name, last_name = split_author_name(name)
+        if first_name or last_name:
+            entries.append({"first": first_name, "last": last_name})
+    return entries
 
 
 def add_field(lines, name, value):
@@ -110,48 +149,50 @@ def add_field(lines, name, value):
     lines.append(f" |{name}= {value}")
 
 
-def author_fields(record):
-    lines = []
-    author_index = 0
-    for creator in record.get("creators", []):
-        if creator.get("creatorType") != "author":
-            continue
-        author_index += 1
-        if creator.get("lastName") or creator.get("firstName"):
-            add_field(lines, f"last{author_index}", creator.get("lastName"))
-            add_field(lines, f"first{author_index}", creator.get("firstName"))
-        else:
-            add_field(lines, f"author{author_index}", creator.get("name"))
-    return lines
+def render_author_fields(lines, paper_data, crossref_message):
+    for index, author in enumerate(author_entries(paper_data, crossref_message), start=1):
+        add_field(lines, f"last{index}", author.get("last"))
+        add_field(lines, f"first{index}", author.get("first"))
 
 
-def format_citoid_as_mediawiki(record, quote=None):
-    item_type = record.get("itemType", "")
-    template_name = ITEM_TYPE_TO_TEMPLATE.get(item_type, "citation")
-    lines = [f"{{{{{template_name}"]
-    lines.extend(author_fields(record))
+def build_citation_fields(identifier):
+    _, source_url = normalize_identifier(identifier)
 
-    add_field(lines, "title", record.get("title"))
+    paper_data = harvest.collect_paper_data_from_url(source_url) or {}
+    doi = extract_doi(identifier, paper_data)
 
-    publication_field = PUBLICATION_FIELD_BY_TYPE.get(item_type)
-    if publication_field:
-        add_field(lines, publication_field, record.get("publicationTitle"))
-    elif item_type == "book":
-        add_field(lines, "publisher", record.get("publisher"))
-    else:
-        add_field(lines, "work", record.get("publicationTitle"))
+    if doi:
+        paper_data = harvest.merge_paper_data(paper_data, harvest.info_from_crossref(doi))
+    crossref_message = fetch_crossref_message(doi)
 
-    add_field(lines, "date", normalize_date(record.get("date")))
-    add_field(lines, "volume", record.get("volume"))
-    add_field(lines, "issue", record.get("issue"))
-    add_field(lines, "pages", record.get("pages"))
-    add_field(lines, "url", record.get("url"))
-    add_field(lines, "access-date", record.get("accessDate"))
-    add_field(lines, "language", record.get("language"))
-    add_field(lines, "quote", quote or record.get("abstractNote"))
-    add_field(lines, "doi", record.get("DOI"))
-    add_field(lines, "isbn", record.get("ISBN"))
-    add_field(lines, "issn", pick_issn(record.get("ISSN")))
+    return {
+        "paper_data": paper_data,
+        "crossref_message": crossref_message,
+        "doi": doi or (crossref_message.get("DOI") if crossref_message else None),
+        "date": crossref_date(crossref_message) or normalize_date(paper_data.get("year")),
+        "volume": crossref_message.get("volume") if crossref_message else None,
+        "issue": crossref_message.get("issue") if crossref_message else None,
+        "pages": normalize_pages(crossref_message.get("page")) if crossref_message else None,
+        "issn": pick_issn(crossref_message.get("ISSN")) if crossref_message else None,
+    }
+
+
+def format_citoid_as_mediawiki(citation_fields):
+    paper_data = citation_fields["paper_data"]
+    crossref_message = citation_fields["crossref_message"]
+
+    lines = ["{{cite journal"]
+    render_author_fields(lines, paper_data, crossref_message)
+    add_field(lines, "title", paper_data.get("title"))
+    add_field(lines, "journal", paper_data.get("venue_title"))
+    add_field(lines, "date", citation_fields.get("date"))
+    add_field(lines, "volume", citation_fields.get("volume"))
+    add_field(lines, "issue", citation_fields.get("issue"))
+    add_field(lines, "pages", citation_fields.get("pages"))
+    add_field(lines, "url", paper_data.get("url"))
+    add_field(lines, "access-date", date.today().isoformat())
+    add_field(lines, "doi", citation_fields.get("doi"))
+    add_field(lines, "issn", citation_fields.get("issn"))
     lines.append("}}")
     return "\n".join(lines)
 
@@ -160,14 +201,7 @@ def main():
     if len(sys.argv) != 2:
         raise SystemExit("Usage: wikipedia-citoid-harvest.py <doi-or-url>")
 
-    identifier = sys.argv[1]
-    record = fetch_citoid_record(identifier)
-
-    quote = None
-    if record.get("url"):
-        quote = fetch_quote(record["url"])
-
-    print(format_citoid_as_mediawiki(record, quote=quote))
+    print(format_citoid_as_mediawiki(build_citation_fields(sys.argv[1])))
 
 
 if __name__ == "__main__":
