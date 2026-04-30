@@ -170,63 +170,88 @@ def process_bitstream_url_oai_pmh(download_url):
     def extract_components(url):
         import urllib.parse
         parsed_url = urllib.parse.urlparse(url)
-        path_parts = parsed_url.path.split('/')
-        if len(path_parts) < 3:
-            raise ValueError("URL path is too short to extract identifier")
+        # normalize path parts (drop empty segments)
+        path_parts = [p for p in parsed_url.path.split('/') if p]
+        if 'bitstream' not in path_parts:
+            raise ValueError("URL path does not contain 'bitstream'")
         bitstream_index = path_parts.index('bitstream')
 
-        base_url = f"{parsed_url.scheme}://{parsed_url.netloc}/"
-        # if bitstream_index != 1:
-        #     base_url += '/'.join(path_parts[1:bitstream_index]) + '/'
-        base_url +="oai/request"
-        # Find 'bitstream' in the path and get the parts after it
+        # identifier parts are the path segments after 'bitstream'
         identifier_parts = path_parts[bitstream_index + 1:]
-        if 'handle' in identifier_parts:
-            handle_index = identifier_parts.index('handle')
-            identifier_parts = identifier_parts[handle_index + 1:]
-        identifier = f"oai:{parsed_url.netloc}:{'/'.join(identifier_parts[0:2])}"
-        return base_url, identifier
+        # handle cases like /bitstream/handle/123/456
+        if identifier_parts and identifier_parts[0] == 'handle':
+            identifier_parts = identifier_parts[1:]
+
+        if len(identifier_parts) < 2:
+            raise ValueError("Not enough identifier parts to build OAI identifier")
+
+        identifier = f"oai:{parsed_url.netloc}:{identifier_parts[0]}/{identifier_parts[1]}"
+
+        base = f"{parsed_url.scheme}://{parsed_url.netloc}"
+        # try common OAI endpoints
+        base_candidates = [f"{base}/oai/request", f"{base}/oai", f"{base}/oai/request/"]
+        return base_candidates, identifier
         
 
     try:
         # example
-        # base_url = "https://orbilu.uni.lu/oai/request"
-        # # Identifier for the record
+        # base_candidates = ["https://orbilu.uni.lu/oai/request", "https://orbilu.uni.lu/oai"]
         # identifier = "oai:orbilu.uni.lu:10993/66145"
-        base_url, identifier = extract_components(download_url)
+        base_candidates, identifier = extract_components(download_url)
 
-        # print("Base URL:", base_url)
-        # print("Identifier:", identifier)
         params = {
             "verb": "GetRecord",
             "metadataPrefix": "oai_dc",    # Dublin Core format
             "identifier": identifier
         }
 
-        # print(f"Fetching OAI-PMH record from {base_url} with identifier {identifier}")
-        try:
-            resp = requests.get(base_url, params=params, timeout=4)
-            resp.raise_for_status()
-        except (requests.exceptions.ConnectTimeout, requests.exceptions.ReadTimeout, requests.exceptions.HTTPError) as e:
-            return 
-        xml = resp.text
-        # print(xml)
+        resp = None
+        xml = None
+        # Try multiple possible OAI endpoints until one returns an OAI XML record
+        for base_url in base_candidates:
+            try:
+                resp = requests.get(base_url, params=params, timeout=6, headers={"User-Agent": "Mozilla/5.0"}, allow_redirects=True)
+            except requests.exceptions.RequestException:
+                resp = None
+                continue
+
+            if resp is None:
+                continue
+
+            if resp.status_code != 200:
+                continue
+
+            text = resp.text or ''
+            if '<OAI-PMH' in text or '<oai:record' in text or '<record' in text:
+                xml = text
+                break
+
+        if not resp or not xml:
+            return None
 
         # parse XML
         root = ET.fromstring(xml)
         ns = {"oai": "http://www.openarchives.org/OAI/2.0/",
-            "dc": "http://purl.org/dc/elements/1.1/"}
+              "dc": "http://purl.org/dc/elements/1.1/"}
 
         record = root.find(".//oai:record", ns)
         if record is None:
             return None
-            raise Exception("No record found")
 
         return record
     except Exception as e:
-        if "<body>" in resp.text.lower() or "<doctype" in resp.text.lower() or "<meta http-equiv" in resp.text.lower():
-            print(f"\nSoft 404 on {base_url} (HTTP {resp.status_code})")
+        resp_text = None
+        resp_status = None
+        if 'resp' in locals() and getattr(resp, 'text', None):
+            resp_text = resp.text
+        if 'resp' in locals() and getattr(resp, 'status_code', None):
+            resp_status = resp.status_code
+        if resp_text and ("<body>" in resp_text.lower() or "<doctype" in resp_text.lower() or "<meta http-equiv" in resp_text.lower()):
+            print(f"\nSoft 404 on {download_url} (HTTP {resp_status})")
             return None
+
+        print(f"Error processing DSpace OAI-PMH URL: {download_url} (HTTP {resp_status}) \\{(resp_text[:200] if resp_text else '')}")
+        raise e
 
         print(f"Error processing DSpace OAI-PMH URL: {base_url} (HTTP {resp.status_code}) \\{resp.text}")
         resp.text[:200] if resp.text else ""
