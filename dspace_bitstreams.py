@@ -387,6 +387,72 @@ def oai_xml_to_json(data):
     return result
 
 
+def process_bitstream_url_handle_html(download_url):
+    """
+    Fallback scraping of the handle page when OAI-PMH is unavailable.
+    Returns the same dict structure as oai_xml_to_json.
+    """
+    import re
+    import urllib.parse
+
+    parsed = urllib.parse.urlparse(download_url)
+    path_parts = [p for p in parsed.path.split('/') if p]
+    if 'bitstream' not in path_parts:
+        return None
+    idx = path_parts.index('bitstream')
+    id_parts = path_parts[idx + 1:]
+    if id_parts and id_parts[0] == 'handle':
+        id_parts = id_parts[1:]
+    if len(id_parts) < 2:
+        return None
+    handle_url = f"{parsed.scheme}://{parsed.netloc}/handle/{id_parts[0]}/{id_parts[1]}"
+
+    try:
+        resp = requests.get(handle_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=6)
+        if resp.status_code != 200:
+            return None
+        text = resp.text
+
+        # Simple regex-based metadata extraction for common DC meta tags
+        def meta(name):
+            m = re.search(r'<meta[^>]+name=["\']?%s["\']?[^>]+content=["\']([^"\']+)["\']' % re.escape(name), text, re.IGNORECASE)
+            return m.group(1).strip() if m else None
+
+        title = meta('DC.title') or meta('dc.title') or None
+        abstract = meta('DC.description') or meta('dc.description') or None
+        publisher = meta('DC.publisher') or meta('dc.publisher') or None
+        # dc.creator may appear multiple times; collect them
+        creators = re.findall(r'<meta[^>]+name=["\']?DC.creator["\']?[^>]+content=["\']([^"\']+)["\']', text, re.IGNORECASE)
+        authors_list = [c.strip() for c in creators] if creators else []
+        authors = '; '.join(authors_list)
+        # Find identifiers that look like bitstream URL or DOI
+        identifiers = re.findall(r'<meta[^>]+name=["\']?DC.identifier["\']?[^>]+content=["\']([^"\']+)["\']', text, re.IGNORECASE)
+        url = None
+        doi = None
+        for ident in identifiers:
+            if ident.startswith('http') and '/bitstream/' in ident:
+                url = ident
+            if 'doi' in ident.lower():
+                if 'doi.org/' in ident.lower():
+                    doi = ident.split('doi.org/', 1)[1]
+                else:
+                    doi = ident.split('doi:', 1)[-1].strip()
+
+        return {
+            'url': url or download_url,
+            'title': title,
+            'abstract': abstract,
+            'tldr': '',
+            'authors': authors,
+            'authors_list': authors_list,
+            'venue_title': publisher,
+            'doi': doi,
+            'note': None,
+        }
+    except Exception:
+        return None
+
+
 def main_bitstream(download_url):
     try:
         # DSpace bitstream URL DSpace 7+
@@ -396,13 +462,22 @@ def main_bitstream(download_url):
 
         # DSpace bitstream URL DSpace 6 and earlier via OAI-PMH
         if "/bitstream/" in download_url:
-            # python dspace_bitstreams.py https://orbilu.uni.lu/bitstream/10993/66145/1/thesis.pd
-            # DSpace bitstream URL DSpace 6 and earlier via OAI-PMH
+            # python dspace_bitstreams.py https://orbilu.uni.lu/bitstream/10993/66145/1/thesis.pdf
+            # Try OAI-PMH first
             oai_data = process_bitstream_url_oai_pmh(download_url)
-            if oai_data is None:
-                return None
-            data = oai_xml_to_json(oai_data)
-            return data
+            if oai_data is not None:
+                data = oai_xml_to_json(oai_data)
+                return data
+
+            # Fallback: try scraping the repository handle page for metadata
+            try:
+                html_data = process_bitstream_url_handle_html(download_url)
+                if html_data:
+                    return html_data
+            except Exception:
+                pass
+
+            return None
     except Exception as e:
         # first message for debugging, second to raise for visibility
         print(f"main_bitstream: Error processing URL: {download_url}")
