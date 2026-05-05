@@ -853,7 +853,7 @@ def paperId_to_bibtex(paperId):
     """
     python -c "from semanticscholar_lib import paperId_to_bibtex; print(paperId_to_bibtex('38f382ed157cd187d28e14c3eac36e3bed34071e'))"
     """
-    url = f"https://api.semanticscholar.org/graph/v1/paper/{paperId}?fields=citationStyles,abstract,externalIds"
+    url = f"https://api.semanticscholar.org/graph/v1/paper/{paperId}?fields=citationStyles,abstract,externalIds,venue"
     response = requests.get(url, headers={"x-api-key": config.semanticscholar_key})
     # {"paperId": "38f382ed157cd187d28e14c3eac36e3bed34071e", "citationStyles": {"bibtex": "@Article{Silva2024RepairBenchLO,\n author = {Andr\u00e9 Silva and Monperrus Martin},\n booktitle = {2025 IEEE/ACM International Workshop on Large Language Models for Code (LLM4Code)},\n journal = {2025 IEEE/ACM International Workshop on Large Language Models for Code (LLM4Code)},\n pages = {9-16},\n title = {RepairBench: Leaderboard of Frontier Models for Program Repair},\n year = {2024}\n}\n"}}
     response.raise_for_status()
@@ -920,6 +920,148 @@ def snippet_search_bibtex(query):
         f.write(data)
 
     return data
+
+
+def snippet_search_bibtex_restricted(query, list_accepted_conf_journals, limit=100):
+    """
+    Search for papers using a query string and return snippets with BibTeX citations,
+    filtered to only include results from specified journals or conferences.
+
+    Args:
+        query (str): The search query string to find relevant papers.
+        list_accepted_conf_journals (list): List of accepted conference or journal names
+            to filter results by. Results will only be included if their venue matches
+            one of the entries in this list (case-insensitive substring match).
+        limit (int): Maximum number of papers to search through before filtering.
+            Results may be fewer if some don't match the accepted venues.
+            Default is 100 (Semantic Scholar API max is 100).
+
+    Returns:
+        str: A YAML-formatted string containing a list of dictionaries, where each
+            dictionary has the following keys:
+            - 'title' (str): The title of the paper
+            - 'snippet' (str): A text snippet from the paper relevant to the query
+            - 'bibtex' (str): The BibTeX citation entry for the paper
+            - 'abstract' (str): The abstract of the paper
+            - 'venue' (str): The venue (journal or conference) where the paper was published
+            - 'doi' (str): (Optional) The DOI of the paper if available
+
+    Example:
+        - bibtex: '@article{...'
+          snippet: 'This paper discusses...'
+          title: 'Artificial Intelligence for Scientific Discovery'
+          abstract: 'In this work, we explore...'
+          venue: 'NeurIPS'
+        ...
+
+    Note:
+        This function depends on snippet_search() and paperId_to_bibtex() functions.
+        The search queries the API with the specified limit, then filters by venue.
+        More results are returned if the venue filter is more selective.
+
+    python -c "from semanticscholar_lib import snippet_search_bibtex_restricted; snippets = snippet_search_bibtex_restricted('Ai for science', ['NeurIPS', 'ICML', 'ICLR']); print(snippets)"
+    """
+    snippets = snippet_search(query, limit=limit)
+    result = []
+
+    for snippet in snippets["data"]:
+        paper = paperId_to_bibtex("CorpusId:" + snippet["paper"]["corpusId"])
+        venue = paper.get("venue", "")
+
+        # Filter by accepted conferences/journals
+        if not any(
+            accepted.lower() in venue.lower()
+            for accepted in list_accepted_conf_journals
+        ):
+            continue
+
+        doi = paper.get("externalIds", {}).get("DOI", "")
+        entry = {
+            "title": snippet["paper"]["title"],
+            "abstract": paper.get("abstract", ""),
+            "snippet": snippet["snippet"]["text"],
+            "bibtex": latex_sanitize(paper["citationStyles"]["bibtex"]),
+            "venue": venue,
+        }
+        if doi:
+            entry["doi"] = doi
+        result.append(entry)
+
+    data = yaml.dump(
+        result, default_flow_style=False, allow_unicode=True, sort_keys=False
+    )
+
+    # Save query and data to cache
+    cache_dir = os.path.expanduser("~/.cache/paper_search")
+    os.makedirs(cache_dir, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    cache_file = os.path.join(cache_dir, f"{timestamp}.yaml")
+    with open(cache_file, "w", encoding="utf-8") as f:
+        f.write(data)
+
+    return data
+
+
+# Top venues for Software Systems from Google Scholar
+# https://scholar.google.com/citations?view_op=top_venues&hl=en&vq=eng_softwaresystems
+SOFTWARE_SYSTEMS_VENUES = [
+    "Software Engineering",  # Main term covering ICSE, etc.
+    "IEEE Transactions on Software Engineering",
+    "Journal of Systems and Software",
+    "Foundations of Software Engineering",  # FSE
+    "Information and Software Technology",
+    "Software Engineering and Methodology",  # TSEM
+    "Empirical Software Engineering",
+    "Automated Software Engineering",  # ASE
+    "Programming Languages",  # POPL, etc.
+    "Software: Practice and Experience",
+    "Programming Language Design and Implementation",  # PLDI
+    "Software Testing and Analysis",  # ISSTA
+    "Mining Software Repositories",
+    "IEEE Software",
+    "Operating Systems Principles",  # SOSP
+    "Software and Systems Modeling",
+    "Software Analysis, Evolution, and Reengineering",  # SANER
+    "Journal of Software: Evolution and Process",
+    "Software Maintenance and Evolution",  # ICSME
+    "Tools and Algorithms for the Construction and Analysis of Systems",  # TACAS
+]
+
+
+def snippet_search_bibtex_restricted_software(query):
+    """
+    Search for papers using a query string and return snippets with BibTeX citations,
+    filtered to only include results from top software systems venues according to
+    Google Scholar's Software Systems ranking.
+
+    Args:
+        query (str): The search query string to find relevant papers.
+
+    Returns:
+        str: A YAML-formatted string containing a list of dictionaries, where each
+            dictionary has the following keys:
+            - 'title' (str): The title of the paper
+            - 'snippet' (str): A text snippet from the paper relevant to the query
+            - 'bibtex' (str): The BibTeX citation entry for the paper
+            - 'abstract' (str): The abstract of the paper
+            - 'venue' (str): The venue (journal or conference) where the paper was published
+            - 'doi' (str): (Optional) The DOI of the paper if available
+
+    Example:
+        - bibtex: '@article{...'
+          snippet: 'This paper discusses...'
+          title: 'Software Refactoring Techniques'
+          abstract: 'In this work, we explore...'
+          venue: 'IEEE Transactions on Software Engineering'
+        ...
+
+    Note:
+        This function depends on snippet_search() and paperId_to_bibtex() functions.
+        The search queries up to 100 papers (API max) and filters to software systems venues.
+
+    python -c "from semanticscholar_lib import snippet_search_bibtex_restricted_software; snippets = snippet_search_bibtex_restricted_software('software testing'); print(snippets)"
+    """
+    return snippet_search_bibtex_restricted(query, SOFTWARE_SYSTEMS_VENUES, limit=100)
 
 
 if __name__ == "__main__":
