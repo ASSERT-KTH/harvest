@@ -2450,6 +2450,9 @@ def collect_paper_data_from_url(url):
         if "preprints.org/" in url:
             return collect_paper_data_from_preprints_org(url)
 
+        if "researchsquare.com/" in url:
+            return collect_paper_data_from_researchsquare(url)
+
         if title == None:
             # default from Zotero Translation Server
             zotero_data = get_zotero_translator_service_url(url)
@@ -2571,6 +2574,20 @@ def collect_paper_data_from_mdpi(url):
         "doi": doi,
         "note": note,
     }
+
+
+def collect_paper_data_from_researchsquare(url):
+    """
+    python -c "import harvest; print(harvest.collect_paper_data_from_researchsquare('https://www.researchsquare.com/article/rs-7745381/latest.pdf'))"
+    """
+    # Normalise PDF URLs to the canonical article page:
+    # https://www.researchsquare.com/article/rs-XXXXXXX/latest.pdf
+    # https://www.researchsquare.com/article/rs-XXXXXXX/v3.pdf  -> drop the suffix
+    article_url = re.sub(r"/(v\d+|latest)\.pdf$", "", url)
+    zotero_data = get_zotero_translator_service_url(article_url)
+    if zotero_data:
+        return transform_zotero_to_output(zotero_data)
+    return None
 
 
 def collect_paper_data_from_preprints_org(url):
