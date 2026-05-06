@@ -74,8 +74,8 @@ def format_closest_related_work_issue(title):
 def format_ranked_paper_preview(result, index):
     lines = [
         f"{index}. [{result['angle']:.4f}] {result['data']['title']}",
+        f"{result['data']['url']}",
         f"Venue: {result['data']['venue_title']}",
-        f"URL: {result['data']['url']}",
         f"Authors: {result['data']['authors'][:100]}...",
     ]
     if result["data"].get("tldr"):
