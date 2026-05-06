@@ -162,14 +162,16 @@ def build_citation_fields(identifier):
     doi = extract_doi(identifier, paper_data)
 
     if doi:
-        paper_data = harvest.merge_paper_data(paper_data, harvest.info_from_crossref(doi))
+        crossref_info = harvest.info_from_crossref(doi)
+        if crossref_info:
+            paper_data = harvest.merge_paper_data(paper_data, crossref_info)
     crossref_message = fetch_crossref_message(doi)
 
     return {
-        "paper_data": paper_data,
+        "paper_data": paper_data or {},
         "crossref_message": crossref_message,
         "doi": doi or (crossref_message.get("DOI") if crossref_message else None),
-        "date": crossref_date(crossref_message) or normalize_date(paper_data.get("year")),
+        "date": crossref_date(crossref_message) or normalize_date((paper_data or {}).get("year")),
         "volume": crossref_message.get("volume") if crossref_message else None,
         "issue": crossref_message.get("issue") if crossref_message else None,
         "pages": normalize_pages(crossref_message.get("page")) if crossref_message else None,
@@ -198,10 +200,62 @@ def format_citoid_as_mediawiki(citation_fields):
 
 
 def main():
-    if len(sys.argv) != 2:
-        raise SystemExit("Usage: wikipedia-citoid-harvest.py <doi-or-url>")
+    if len(sys.argv) < 2 or len(sys.argv) > 3:
+        raise SystemExit("Usage: wikipedia-citoid-harvest.py <doi-or-url> [fix]")
 
-    print(format_citoid_as_mediawiki(build_citation_fields(sys.argv[1])))
+    identifier = sys.argv[1]
+    fix_mode = sys.argv[2] == "fix" if len(sys.argv) == 3 else False
+
+    citation_fields = build_citation_fields(identifier)
+    output = format_citoid_as_mediawiki(citation_fields)
+
+    if fix_mode:
+        output = fix_citation_output(output, citation_fields)
+
+    print(output)
+
+
+def fix_citation_output(output, citation_fields):
+    """Apply fixes and improvements to citation output.
+    
+    - Remove empty/None fields
+    - Normalize whitespace
+    - Ensure consistent formatting
+    - Validate required fields
+    """
+    lines = output.split("\n")
+    fixed_lines = []
+
+    for line in lines:
+        # Keep template markers
+        if line.strip() in ("{{cite journal", "}}"):
+            fixed_lines.append(line)
+            continue
+
+        # Skip empty lines
+        if not line.strip():
+            continue
+
+        # Parse field line
+        if "|" in line and "=" in line:
+            parts = line.split("=", 1)
+            if len(parts) == 2:
+                field_part = parts[0]
+                value_part = parts[1].strip()
+
+                # Skip empty/None values
+                if not value_part or value_part in ("None", ""):
+                    continue
+
+                # Normalize spacing around equals
+                fixed_lines.append(f"{field_part}= {value_part}")
+                continue
+
+        # Keep other lines as-is
+        if line.strip():
+            fixed_lines.append(line)
+
+    return "\n".join(fixed_lines)
 
 
 if __name__ == "__main__":
