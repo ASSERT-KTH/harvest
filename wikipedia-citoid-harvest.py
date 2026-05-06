@@ -155,17 +155,55 @@ def render_author_fields(lines, paper_data, crossref_message):
         add_field(lines, f"first{index}", author.get("first"))
 
 
-def build_citation_fields(identifier):
+def fetch_semantic_scholar(identifier):
+    """Try to fetch metadata from Semantic Scholar API."""
+    try:
+        response = requests.get(
+            f"https://api.semanticscholar.org/graph/v1/paper/{identifier}",
+            params={"fields": "title,authors,venue,year,publicationDate,url"},
+            timeout=10,
+        )
+        if response.status_code == 200:
+            return response.json()
+    except Exception:
+        pass
+    return None
+
+
+def build_citation_fields(identifier, debug=False):
     _, source_url = normalize_identifier(identifier)
 
     paper_data = harvest.collect_paper_data_from_url(source_url) or {}
     doi = extract_doi(identifier, paper_data)
 
+    if debug:
+        print(f"[DEBUG] Identifier: {identifier}", file=sys.stderr)
+        print(f"[DEBUG] Source URL: {source_url}", file=sys.stderr)
+        print(f"[DEBUG] Initial paper_data: {paper_data}", file=sys.stderr)
+        print(f"[DEBUG] Extracted DOI: {doi}", file=sys.stderr)
+
+    crossref_message = None
     if doi:
         crossref_info = harvest.info_from_crossref(doi)
         if crossref_info:
             paper_data = harvest.merge_paper_data(paper_data, crossref_info)
-    crossref_message = fetch_crossref_message(doi)
+        crossref_message = fetch_crossref_message(doi)
+        if debug:
+            print(f"[DEBUG] CrossRef message: {crossref_message is not None}", file=sys.stderr)
+
+    # Fallback to Semantic Scholar if CrossRef didn't work
+    if not crossref_message and not paper_data:
+        ss_data = fetch_semantic_scholar(identifier)
+        if ss_data and debug:
+            print(f"[DEBUG] Semantic Scholar found: {ss_data.get('title')}", file=sys.stderr)
+        if ss_data:
+            paper_data = {
+                "title": ss_data.get("title"),
+                "authors": ", ".join([a.get("name", "") for a in ss_data.get("authors", [])[:5]]),
+                "year": ss_data.get("year"),
+                "venue_title": ss_data.get("venue"),
+                "url": ss_data.get("url"),
+            }
 
     return {
         "paper_data": paper_data or {},
@@ -207,6 +245,20 @@ def main():
     fix_mode = sys.argv[2] == "fix" if len(sys.argv) == 3 else False
 
     citation_fields = build_citation_fields(identifier)
+    
+    # Check if we have meaningful metadata (more than just DOI and access-date)
+    paper_data = citation_fields.get("paper_data", {})
+    has_title = paper_data.get("title")
+    has_authors = paper_data.get("authors") or paper_data.get("author_list")
+    has_venue = paper_data.get("venue_title")
+    crossref_msg = citation_fields.get("crossref_message")
+    
+    # Require at least a title and either authors or venue, not just a DOI
+    if not has_title and not (crossref_msg and crossref_msg.get("title")):
+        sys.stderr.write(f"Error: Could not find full metadata for '{identifier}'\n")
+        sys.stderr.write(f"The DOI/URL may be invalid, malformed, or not yet indexed in CrossRef\n")
+        raise SystemExit(1)
+    
     output = format_citoid_as_mediawiki(citation_fields)
 
     if fix_mode:
