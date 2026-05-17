@@ -13,7 +13,6 @@ For batch processing of cached papers:
 """
 import feedparser
 import re
-import cgi
 import datetime
 import email.utils
 import pytz
