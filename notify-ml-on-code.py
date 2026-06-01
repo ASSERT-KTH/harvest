@@ -39,6 +39,9 @@ def extract_titles_from_md(path):
     print(f"Found {len(urls)} URLs in ml-on-code.md", file=sys.stderr)
     titles = []
     for url in urls:
+        if not is_high_reputation(url):
+            print(f"  [skip] not an academic paper: {url}", file=sys.stderr)
+            continue
         try:
             data = collect_paper_data_from_url_with_cache(url)
             if data and data.get("title"):
@@ -93,6 +96,8 @@ def main():
             title = paper_data.get("title", "")
             url = paper_data.get("url", "")
             if not title:
+                continue
+            if not is_high_reputation(url):
                 continue
             result = get_embedding_and_push_to_db(title)
             if not result or not result.get("embedding") or not result["embedding"].get("vector"):
