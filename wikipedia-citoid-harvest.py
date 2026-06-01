@@ -57,10 +57,6 @@ def normalize_date(value):
         parts = [str(part) for part in value if part]
     else:
         parts = str(value).split("-")
-    if len(parts) >= 2:
-        parts[1] = parts[1].zfill(2)
-    if len(parts) >= 2:
-        return "-".join(parts[:2])
     return parts[0] if parts else None
 
 
