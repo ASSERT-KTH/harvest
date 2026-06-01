@@ -1376,15 +1376,12 @@ def collect_paper_data_from_diva(url):
             "note": None,
         }
 
-    # Call the DiVA API
-    api_url = f"https://www.monperrus.net/martin/diva-urn-json.py?urn={diva_id}"
-    # print(api_url)
+    # Call the local DiVA tool
     try:
-        response = requests.get(api_url)
-        response.raise_for_status()
-        diva_data = response.json()
+        result = subprocess.run(["diva-urn-json", diva_id], capture_output=True, text=True, check=True)
+        diva_data = json.loads(result.stdout)
         # print(diva_data)
-    except (requests.RequestException, json.JSONDecodeError) as e:
+    except (subprocess.CalledProcessError, json.JSONDecodeError) as e:
         print(f"Error fetching or parsing DiVA data for {diva_id}: {e}")
         return {
             "url": url,
