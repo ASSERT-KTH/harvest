@@ -386,8 +386,9 @@ class ScholarScraper:
 
     def save_paper(self, paper):
         # this should work
+        origin = "Scholar author notification" if any("author_alert" in r for r in paper.reason) else "scholar"
         create_harvest_email_paper(
-            paper, self.service, origin="scholar", detection_date=self.msg_date
+            paper, self.service, origin=origin, detection_date=self.msg_date
         )
         return 1
 
@@ -826,6 +827,18 @@ def create_harvest_email_paper(paper, service, **kwargs):
     transfer_data_from_dict_to_paper(paper, paper_data)
 
     paper.origin = origin
+
+    # persist origin into the cache/harvest/ JSON file
+    _, thepath = already_seen_url(
+        paper.url, "/home/martin/workspace/scholar-harvest/cache/harvest/"
+    )
+    if os.path.exists(thepath):
+        with open(thepath, "r") as f:
+            cached = json.load(f)
+        if not cached.get("origin"):
+            cached["origin"] = origin
+            with open(thepath, "w") as f:
+                json.dump(cached, f)
 
     paper.categories = compute_categories_embedding(paper)
 
