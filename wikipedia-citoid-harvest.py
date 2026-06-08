@@ -230,7 +230,7 @@ def format_citoid_as_mediawiki(citation_fields):
     add_field(lines, "doi", citation_fields.get("doi"))
     add_field(lines, "issn", citation_fields.get("issn"))
     lines.append("}}")
-    return "\n".join(lines)
+    return "".join(lines)
 
 
 def main():
@@ -303,7 +303,7 @@ def fix_citation_output(output, citation_fields):
         if line.strip():
             fixed_lines.append(line)
 
-    return "\n".join(fixed_lines)
+    return "".join(fixed_lines)
 
 
 if __name__ == "__main__":
