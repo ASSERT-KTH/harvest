@@ -49,6 +49,8 @@ test = [
 
 [project.scripts]
 scholar-harvest = "harvest:main"
+paper_search = "paper_search:main"
+semantic_scholar_snippet_search = "paper_search:main"
 
 [tool.setuptools]
 py-modules = [
