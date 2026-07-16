@@ -347,6 +347,7 @@ class ScholarScraper:
     def __init__(self):
         self.papers = dict()
         self.pending_subject = None
+        self.new_author_alert_papers = []
 
     def set_subject(self, subject):
         if subject != None:
@@ -387,9 +388,11 @@ class ScholarScraper:
     def save_paper(self, paper):
         # this should work
         origin = "Scholar author notification" if any("author_alert" in r for r in paper.reason) else "scholar"
-        create_harvest_email_paper(
+        is_new = create_harvest_email_paper(
             paper, self.service, origin=origin, detection_date=self.msg_date
         )
+        if is_new and origin == "Scholar author notification":
+            self.new_author_alert_papers.append(paper)
         return 1
 
     def dump_by_reason(self):
@@ -3734,6 +3737,7 @@ def classify_scholarnotifications():
         ).execute()
 
     scraper.dump_by_reason()
+    return scraper
 
 
 def cutoff_date_gmail():
@@ -4332,13 +4336,15 @@ def main():
         .lower()
     )
     setup_categories()
-    classify_scholarnotifications()
+    scraper = classify_scholarnotifications()
     classify_planetse()
     classify_semanticscholar()
     pinecone_after = embed.total_number_entries_in_pinecone_index("se-semanticscholar")
     print(
         f"Pinecone entries before: {pinecone_before}, after: {pinecone_after}, added: {pinecone_after - pinecone_before}"
     )
+    for paper in scraper.new_author_alert_papers:
+        notify_email(paper, scraper.service)
 
 
 if __name__ == "__main__":
